@@ -1,5 +1,8 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
+import axios from "axios";
+import validator from "validator";
+import { useNavigate } from "react-router-dom";
 
 const Register = () => {
   const [formData, setFormData] = useState({
@@ -9,6 +12,7 @@ const Register = () => {
     password: "",
     confirmPassword: "",
   });
+  const navigate = useNavigate();
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -18,14 +22,40 @@ const Register = () => {
     });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Validate passwords
     if (formData.password !== formData.confirmPassword) {
       alert("Passwords do not match!");
       return;
     }
-    console.log("Register:", formData);
-    // Add register functionality here
+
+    if (formData.password.length < 8) {
+      alert("Password must be at least 8 characters long!");
+      return;
+    }
+
+    // Validate email format
+    if (!validator.isEmail(formData.email)) {
+      alert("Invalid email format");
+      return;
+    }
+
+    // Send request
+    try {
+      await axios.post("http://localhost:3000/api/register", formData);
+      console.log("Registration success");
+      navigate("/login");
+    } catch (error) {
+      const message = error.response?.data?.message;
+
+      if (message) {
+        alert(`Registration failed: ${message}`);
+      } else {
+        alert("Registration failed: An unexpected error occurred.");
+      }
+    }
   };
 
   return (

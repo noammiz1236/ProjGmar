@@ -1,14 +1,36 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-
+import validator from "validator";
+import axios from "axios";
 const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    console.log("Login:", { email, password });
-    // Add login functionality here
+    // Handle login logic here
+    if (password.length < 8) {
+      alert("Password must be at least 8 characters long!");
+      return;
+    }
+
+    if (!validator.isEmail(email)) {
+      alert("Invalid email format");
+      return;
+    }
+
+    try {
+      await axios.post("http://localhost:3000/api/login", { email, password });
+      console.log("Login success");
+      // Redirect or update UI on successful login with user data
+    } catch (err) {
+      const message = err.response?.data?.message;
+      if (message) {
+        alert(`Login failed: ${message}`);
+      } else {
+        alert("Login failed: An unexpected error occurred.");
+      }
+    }
   };
 
   return (
