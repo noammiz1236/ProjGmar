@@ -1,0 +1,60 @@
+-- 1. טבלת משתמשים
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    password_hash VARCHAR(255) NOT NULL
+);
+
+-- 2. טבלת מוצרים (לפי הברקוד ב-XML)
+CREATE TABLE items (
+    id SERIAL PRIMARY KEY,
+    barcode VARCHAR(50) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    manufacturer VARCHAR(255),
+    is_weighted BOOLEAN DEFAULT FALSE
+);
+
+-- 3. טבלת מחירים (לפי הסניף והרשת ב-XML)
+CREATE TABLE prices (
+    id SERIAL PRIMARY KEY,
+    item_id INT REFERENCES items(id) ON DELETE CASCADE,
+    price DECIMAL(10, 2) NOT NULL,
+    chain_id BIGINT NOT NULL,
+    sub_chain_id INT NOT NULL,
+    store_id INT NOT NULL,
+    bikoret_no INT
+);
+
+-- 4. כותרת הסל (מה שכתבת - פותר את הבעיה)
+CREATE TABLE baskets (
+    id SERIAL PRIMARY KEY,
+    item_id INT REFERENCES items(id),
+    user_id INT REFERENCES users(id) ON DELETE CASCADE,
+    basket_name VARCHAR(100) DEFAULT 'My Basket',
+);
+
+pitchers {
+ui{
+  navbar{
+    login/register || profile 
+    if login () => setting{
+      change site black/white
+      delete user,
+      change password,
+    } 
+    home/logo:redirect to main
+    cart:small logo that show num of item in cart like ksp
+  }
+  main page ui{
+    show popular item base of recent buy of the user
+    next to every prudoct a big + to quick add it to card
+
+  }
+  carts{
+      add: 2 buttons if + do ++ else the item else remove-- if item --< 1 remove item form cart
+      img of the item next ot the price
+      button to continue shopping redirect you to the main page
+     }
+  }

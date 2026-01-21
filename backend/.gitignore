@@ -1,0 +1,38 @@
+# Node modules (תיקייה שנוצרת אוטומטית)
+node_modules/
+
+# Environment variables (סיסמאות)
+.env
+.env.*
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output
+dist/
+build/
+
+# Cache
+.cache/
+.tmp/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+
+# Test coverage
+coverage/
+
+# SSL / Keys (אם יש)
+*.pem
+*.key
+*.crt
