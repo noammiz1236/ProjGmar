@@ -12,15 +12,14 @@ const { Pool } = pg;
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
-
 cron.schedule("0 5 * * *", () => {
   console.log("Running scheduled task: processAllFiles");
-  processAllFiles("A:/vs code/fullstack/SmartCart/my_prices/Keshet").catch(
-    (err) => console.error("fatal error", err),
-  );
+  const serverPath = process.env.PRICES_PATH || "/app/my_prices/Keshet";
+  processAllFiles(serverPath).catch((err) => console.error("fatal error", err));
 });
 
 app.use(morgan("dev"));
+
 app.use(express.json());
 
 db.query("SELECT NOW()", (err, res) => {
