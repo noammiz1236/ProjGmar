@@ -112,7 +112,7 @@ export async function parsePriceFile(xmlPath, branchId) {
     );
     if (branchCheck.rowCount === 0) {
       console.warn(
-        `⚠️ Branch ${branchId} does not exist in database. Skipping price file ${xmlPath}`,
+        `Branch ${branchId} does not exist in database. Skipping price file ${xmlPath}`,
       );
       await movetoprocess(xmlPath);
       return;
