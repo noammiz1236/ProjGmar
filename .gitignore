@@ -6,6 +6,11 @@ node_modules/
 .env
 *.env
 
+# Price data directory
+my_prices/
+
+# XML files
+*.xml
 # Logs
 *.log
 npm-debug.log*
