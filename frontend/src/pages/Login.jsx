@@ -44,18 +44,18 @@ const Login = () => {
           <div className="col-md-6">
             <div className="card shadow">
               <div className="card-body p-5">
-                <h2 className="card-title text-center mb-4">Login</h2>
+                <h2 className="card-title text-center mb-4">התחברות</h2>
 
                 <form onSubmit={handleSubmit}>
                   <div className="mb-3">
                     <label htmlFor="email" className="form-label">
-                      Email Address
+                      אימייל
                     </label>
                     <input
                       type="email"
                       className="form-control"
                       id="email"
-                      placeholder="Enter your email"
+                      placeholder="הכנס אימייל"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
@@ -64,13 +64,13 @@ const Login = () => {
 
                   <div className="mb-3">
                     <label htmlFor="password" className="form-label">
-                      Password
+                      סיסמה
                     </label>
                     <input
                       type="password"
                       className="form-control"
                       id="password"
-                      placeholder="Enter your password"
+                      placeholder="הכנס סיסמה"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
@@ -78,15 +78,15 @@ const Login = () => {
                   </div>
 
                   <button type="submit" className="btn btn-primary w-100 mb-3">
-                    Login
+                    התחברות
                   </button>
                 </form>
 
                 <div className="text-center">
                   <p className="mb-0">
-                    Don't have an account?{" "}
+                    אין לך חשבון?{" "}
                     <a href="/register" className="text-primary fw-bold">
-                      Register here
+                      הירשם כאן
                     </a>
                   </p>
                 </div>

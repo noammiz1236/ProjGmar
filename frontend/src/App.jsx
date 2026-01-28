@@ -5,9 +5,8 @@ import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Store from "./pages/Store";
-import Profile from "./pages/Profile";
+import ProductPage from "./pages/ProductPage";
 import { AuthProvider } from "./context/AuthContext";
-import PrivateRoute from "./components/PrivateRoute"; // <-- צריך ליצור את הקובץ הזה
 
 function App() {
   return (
@@ -19,25 +18,8 @@ function App() {
           <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-
-          {/* רק משתמשים מחוברים יכולים להיכנס */}
-          <Route
-            path="/store"
-            element={
-              <PrivateRoute>
-                <Store />
-              </PrivateRoute>
-            }
-          />
-
-          <Route
-            path="/profile"
-            element={
-              <PrivateRoute>
-                <Profile />
-              </PrivateRoute>
-            }
-          />
+          <Route path="/store" element={<Store />} />
+          <Route path="/product/:id" element={<ProductPage />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

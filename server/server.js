@@ -1,6 +1,5 @@
 import express from "express";
 import morgan from "morgan";
-import pg from "pg";
 import { config } from "dotenv";
 import cron from "node-cron";
 import { processAllFiles } from "./db/sortfolder.js";
@@ -9,6 +8,8 @@ import cors from "cors";
 import validator from "validator";
 import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
+import pg from "pg";
+// import db from "./db/db.js";
 
 config();
 const port = 3000;
@@ -16,9 +17,20 @@ const app = express();
 const saltRounds = 10;
 
 const { Pool } = pg;
+
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
+
+// Test connection
+db.query("SELECT NOW()", (err, res) => {
+  if (err) {
+    console.error("Database connection error:", err.message);
+  } else {
+    console.log("PostgreSQL (israel_shopping_db) connected");
+  }
+});
+
 cron.schedule("0 5 * * *", () => {
   console.log("Running scheduled task: processAllFiles");
   const serverPath = process.env.PRICES_PATH || "/app/my_prices/Keshet";
@@ -104,10 +116,9 @@ app.post("/api/login", async (req, res) => {
     if (!validator.isEmail(email)) {
       return res.status(400).json({ message: "Invalid email format" });
     }
-    const results = await db.query(
-      "SELECT * FROM app.users WHERE email = $1",
-      [email],
-    );
+    const results = await db.query("SELECT * FROM app.users WHERE email = $1", [
+      email,
+    ]);
     if (results.rows.length === 0) {
       return res.status(400).json({ message: "Invalid email or password" });
     }
@@ -160,6 +171,42 @@ app.get("/api/me", async (req, res) => {
 app.post("/api/logout", (req, res) => {
   res.clearCookie("token");
   return res.status(200).json({ message: "Logged out" });
+});
+
+// STORE
+app.get("/api/store", async (req, res) => {
+  try {
+    // קבלת פרמטרים מה-query string
+    const limit = parseInt(req.query.limit) || 12; // כמה מוצרים לשלוף בכל בקשה
+    const offset = parseInt(req.query.offset) || 0; // מאיפה להתחיל
+
+    const results = await db.query(
+      `
+      SELECT DISTINCT ON (i.id, c.id)
+    i.id AS item_id,
+    i.name AS item_name,
+    p.price AS price,
+    c.id AS chain_id,
+    c.name AS chain_name
+FROM app.items i
+JOIN app.prices p ON i.id = p.item_id
+JOIN app.branches b ON p.branch_id = b.id
+JOIN app.chains c ON b.chain_id = c.id
+ORDER BY i.id, c.id, p.price
+LIMIT $1 OFFSET $2
+    `,
+      [limit, offset],
+    );
+
+    const products = results.rows;
+    const hasMore = products.length === limit; // אם פחות מהמגבלה → נגמרו המוצרים
+    const nextOffset = offset + products.length;
+
+    return res.status(200).json({ products, hasMore, nextOffset });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Error fetching products" });
+  }
 });
 
 app.listen(port, () => {

@@ -1,21 +1,21 @@
 /* Mobile Sidebar Styles */
 .mobile-sidebar {
   position: fixed;
-  left: -100%;
+  right: -100%;
   top: 60px;
   width: 100%;
   max-width: 280px;
   height: calc(100vh - 60px);
   background-color: #fff;
-  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
-  transition: left 0.3s ease;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+  transition: right 0.3s ease;
   overflow-y: auto;
   z-index: 1040;
   padding: 20px;
 }
 
 .mobile-sidebar.open {
-  left: 0;
+  right: 0;
 }
 
 .mobile-sidebar-overlay {
