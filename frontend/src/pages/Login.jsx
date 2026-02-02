@@ -1,10 +1,12 @@
 import React, { useState, useContext } from "react";
 import validator from "validator";
-import api from "../api";
+import api, { setAccessToken } from "../api"; // ייבוא ה-api והפונקציה לעדכון הטוקן
 import { AuthContext } from "../context/AuthContext";
+import { useNavigate } from "react-router-dom"; // הוספתי למקרה שתרצה להעביר דף אחרי לוגין
 
 const Login = () => {
   const { setUser } = useContext(AuthContext);
+  const navigate = useNavigate();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -12,6 +14,7 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    // וולידציות מקוריות שלך
     if (password.length < 8) {
       alert("Password must be at least 8 characters long!");
       return;
@@ -23,10 +26,20 @@ const Login = () => {
     }
 
     try {
+      // שליחת הבקשה לשרת
       const res = await api.post("/api/login", { email, password });
 
-      // חשוב: setUser מהתשובה של /login
+      // --- השדרוג המודרני ---
+      // 1. שמירת ה-Access Token בזיכרון של קובץ ה-api
+      setAccessToken(res.data.accessToken);
+
+      // 2. עדכון ה-User ב-Context (מכיל id, first_name, email וכו')
       setUser(res.data.user);
+
+      // אופציונלי: העברה לדף הבית אחרי התחברות מוצלחת
+      // navigate("/");
+
+      alert("Login successful!");
     } catch (err) {
       const message = err.response?.data?.message;
       if (message) {
