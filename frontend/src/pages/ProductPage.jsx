@@ -17,7 +17,7 @@ const ProductPage = () => {
   };
 
   const product = {
-    name: location.state?.product?.name || defaultProduct.name,
+    name: location.state?.product?.item_name || defaultProduct.name,
     price: location.state?.product?.price || defaultProduct.price,
     description:
       location.state?.product?.description || defaultProduct.description,

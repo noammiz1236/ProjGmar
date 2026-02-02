@@ -9,7 +9,6 @@ import validator from "validator";
 import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
 import pg from "pg";
-// import db from "./db/db.js";
 
 config();
 const port = 3000;
@@ -189,12 +188,12 @@ app.get("/api/store", async (req, res) => {
     c.id AS chain_id,
     c.name AS chain_name
 FROM app.items i
-JOIN app.prices p ON i.id = p.item_id
-JOIN app.branches b ON p.branch_id = b.id
-JOIN app.chains c ON b.chain_id = c.id
-ORDER BY i.id, c.id, p.price
-LIMIT $1 OFFSET $2
-    `,
+          JOIN app.prices p ON i.id = p.item_id
+          JOIN app.branches b ON p.branch_id = b.id
+          JOIN app.chains c ON b.chain_id = c.id
+          ORDER BY i.id, c.id, p.price
+          LIMIT $1 OFFSET $2
+              `,
       [limit, offset],
     );
 
