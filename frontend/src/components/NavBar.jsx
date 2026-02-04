@@ -87,6 +87,11 @@ const NavBar = () => {
                     </span>
                   </li>
                   <li className="nav-item">
+                    <Link className="btn btn-outline-secondary" to="/profile">
+                      <i className="bi bi-gear-fill me-1"></i> Settings
+                    </Link>
+                  </li>
+                  <li className="nav-item">
                     <button
                       className="btn btn-outline-danger"
                       onClick={handleLogout}
@@ -175,6 +180,15 @@ const NavBar = () => {
             <>
               <li>
                 <span className="text-primary">{user.first_name}</span>
+              </li>
+              <li>
+                <Link
+                  className="btn btn-outline-secondary w-100 my-2"
+                  to="/profile"
+                  onClick={closeSidebar}
+                >
+                  <i className="bi bi-gear-fill me-1"></i> Settings
+                </Link>
               </li>
               <li>
                 <button

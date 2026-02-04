@@ -219,6 +219,33 @@ app.post("/api/logout", async (req, res) => {
   return res.status(200).json({ message: "Logged out" });
 });
 
+// Logout מכל המכשירים
+app.post("/api/logout-all", authenticateToken, async (req, res) => {
+  const userId = req.userId; // מזהה המשתמש מ־JWT
+
+  try {
+    // מוחק את כל ה-refresh tokens של המשתמש מה־DB
+    await db.query("DELETE FROM app.refresh_tokens WHERE user_id = $1", [
+      userId,
+    ]);
+
+    // מנקה את ה-cookie בצד הלקוח
+    res.clearCookie("refreshToken", {
+      httpOnly: true,
+      secure: true,
+      sameSite: "Strict",
+      path: "/",
+    });
+
+    return res.status(200).json({ message: "Logged out from all devices" });
+  } catch (err) {
+    console.error("Error logging out from all devices:", err);
+    return res
+      .status(500)
+      .json({ message: "Error logging out from all devices" });
+  }
+});
+
 // STORE (דוגמה לאבטחת ה-Route במידת הצורך - הוסף authenticateToken אם תרצה)
 app.get("/api/store", async (req, res) => {
   try {
@@ -247,6 +274,56 @@ app.get("/api/store", async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: "Error fetching products" });
+  }
+});
+
+app.put("/api/user/password", authenticateToken, async (req, res) => {
+  const userId = req.userId;
+  const { currentPassword, newPassword, confirmNewPassword } = req.body;
+
+  // 1️⃣ בדיקות בסיסיות
+  if (newPassword !== confirmNewPassword) {
+    return res.status(400).json({ message: "Passwords do not match" });
+  }
+
+  if (!currentPassword || !newPassword || !confirmNewPassword) {
+    return res.status(400).json({ message: "Missing fields" });
+  }
+  if (currentPassword.length < 8) {
+    return res.status(400).json({ message: "Password too weak" });
+  }
+  if (currentPassword === newPassword) {
+    return res
+      .status(400)
+      .json({ message: "New password must differ from current" });
+  }
+
+  if (newPassword.length < 8) {
+    return res.status(400).json({ message: "Password too weak" });
+  }
+
+  try {
+    const { rows } = await db.query(
+      "SELECT password_hash FROM app.users WHERE id = $1",
+      [userId],
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    const user = rows[0];
+    const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Invalid current password" });
+    }
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await db.query("UPDATE app.users SET password_hash = $1 WHERE id = $2", [
+      hashedPassword,
+      userId,
+    ]);
+    return res.status(200).json({ message: "Password updated successfully" });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Error updating password" });
   }
 });
 

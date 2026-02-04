@@ -35,11 +35,6 @@ const Login = () => {
 
       // 2. עדכון ה-User ב-Context (מכיל id, first_name, email וכו')
       setUser(res.data.user);
-
-      // אופציונלי: העברה לדף הבית אחרי התחברות מוצלחת
-      // navigate("/");
-
-      alert("Login successful!");
     } catch (err) {
       const message = err.response?.data?.message;
       if (message) {
