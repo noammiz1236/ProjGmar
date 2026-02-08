@@ -1,4 +1,4 @@
-import express from "express";
+import express, { json } from "express";
 import morgan from "morgan";
 import pg from "pg";
 import { config } from "dotenv";
@@ -9,12 +9,21 @@ import cors from "cors";
 import validator from "validator";
 import cookieParser from "cookie-parser";
 import jwt from "jsonwebtoken";
+import { Server } from "socket.io";
+import http from "http";
 
 config();
-const port = 3000;
+const port = 5000;
 const app = express();
+const server = http.createServer(app);
 const saltRounds = 10;
 
+const io = new Server(server, {
+  cors: {
+    origin: process.env.host_allowed,
+    methods: ["GET", "POST"],
+  },
+});
 const { Pool } = pg;
 const db = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -46,8 +55,22 @@ db.query("SELECT NOW()", (err, res) => {
 });
 
 app.get("/api/search", async (req, res) => {
-  await db.query(`
-    select `);
+  console.log(req.query);
+  const search = req.query.q;
+  if (!search) return res.json([]);
+  try {
+    const searchTerm = `%${search}%`;
+    const reply = await db.query(
+      `SELECT * FROM app.items WHERE name ILIKE $1
+      limit 10`,
+      [searchTerm],
+    );
+    console.log("Searching for:", searchTerm);
+    res.json(reply.rows);
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json([]);
+  }
 });
 
 // REGISTER
@@ -104,10 +127,9 @@ app.post("/api/login", async (req, res) => {
     if (!validator.isEmail(email)) {
       return res.status(400).json({ message: "Invalid email format" });
     }
-    const results = await db.query(
-      "SELECT * FROM app.users WHERE email = $1",
-      [email],
-    );
+    const results = await db.query("SELECT * FROM app.users WHERE email = $1", [
+      email,
+    ]);
     if (results.rows.length === 0) {
       return res.status(400).json({ message: "Invalid email or password" });
     }
@@ -162,6 +184,78 @@ app.post("/api/logout", (req, res) => {
   return res.status(200).json({ message: "Logged out" });
 });
 
-app.listen(port, () => {
+io.on("connection", (socket) => {
+  socket.on("join_list", (listId) => {
+    socket.join(listId);
+    console.log(`משתמש הצטרף לרשימה מספר: ${listId}`);
+  });
+  socket.on("send_item", async (data) => {
+    const {
+      listId,
+      itemName,
+      price,
+      storeName,
+      quantity,
+      addby,
+      addat,
+      updatedat,
+    } = data;
+    try {
+      const query = `insert into app.list_items (listId, itemName, price, storeName,quantity,addby,addat,updatedat)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`;
+
+      const values = [
+        listId,
+        itemName,
+        price,
+        storeName,
+        quantity,
+        addby,
+        addat,
+        updatedat,
+      ];
+      const result = await db.query(query, values);
+      const newItem = result.rows[0];
+
+      io.to(listId).emit("receive_item", newItem);
+    } catch (e) {
+      console.error("שגיאה בשמירה ל-DB:", e);
+    }
+  });
+  socket.on("toggle_item", async (data) => {
+    const { itemId, listId, isChecked } = data;
+    try {
+      await db.query(
+        "UPDATE app.list_items SET is_checked = $1 WHERE id = $2",
+        [isChecked, itemId],
+      );
+      io.to(listId).emit("item_status_changed", { itemId, isChecked });
+    } catch (err) {
+      console.error(err);
+    }
+  });
+  socket.on("create_list", async (list, callback) => {
+    const { list_name, userId } = list;
+    if (!list_name || !userId)
+      return callback({ success: false, error: `missing data` });
+    try {
+      const listRes = await client.query(
+        `INSERT INTO app.list (list_name) VALUES ($1) RETURNING id`,
+        [list_name],
+      );
+      const newListId = listRes.rows[0].id;
+      await client.query(
+        `INSERT INTO app.list_members (list_id, user_id, status) VALUES ($1, $2, $3)`,
+        [newListId, userId, "admin"],
+      );
+      callback({ success: true, listId: newListId });
+    } catch (e) {
+      console.error(e);
+      callback({ success: false, msg: `db eror` });
+    }
+  });
+});
+
+server.listen(port, () => {
   console.log(`SmartCart Server running on port : ${port}`);
 });
