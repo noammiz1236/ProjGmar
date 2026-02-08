@@ -143,7 +143,7 @@ app.post("/api/register", async (req, res) => {
       { expiresIn: "15m" },
     );
 
-    const verifyLink = `http://localhost:${port}/api/verify-email?token=${token}`;
+    const verifyLink = `http://localhost:${port}/api/verify-email?token=${encodeURIComponent(token)}`;
 
     // שליחת מייל למשתמש (רק אם הוגדרו credentials)
     if (
@@ -200,8 +200,8 @@ app.post("/api/register", async (req, res) => {
 });
 
 app.get("/api/verify-email", async (req, res) => {
-  const { token } = req.query;
-
+  const token = req.query.token;
+  console.log(token);
   try {
     // בדיקת JWT
     const payload = jwt.verify(token, process.env.JWT_SECRET);
@@ -235,10 +235,10 @@ app.get("/api/verify-email", async (req, res) => {
     // יוצר את המשתמש ב-DB (עם בדיקה למניעת כפילויות)
     const userResult = await db.query(
       `INSERT INTO app2.users 
-       (first_name, last_name, email, password_hash, email_verified_at) 
-       VALUES ($1, $2, $3, $4, NOW()) 
-       RETURNING id, first_name, last_name, email
-       ON CONFLICT (email) DO NOTHING`,
+   (first_name, last_name, email, password_hash, email_verified_at) 
+   VALUES ($1, $2, $3, $4, NOW()) 
+   ON CONFLICT (email) DO NOTHING
+   RETURNING id, first_name, last_name, email`, // הועבר לסוף
       [first_name, last_name, email, password_hash],
     );
 
@@ -272,10 +272,11 @@ app.get("/api/verify-email", async (req, res) => {
       accessToken,
     });
   } catch (err) {
-    console.error("Verification error:", err.name, err.message);
+    // לוג שיעזור לך להבין בזמן אמת מה קרה
+    console.error("JWT Verification Detail:", err.message);
 
     if (err.name === "JsonWebTokenError") {
-      return res.status(400).json({ message: "Invalid token" });
+      return res.status(400).json({ message: "Invalid token signature" });
     }
     if (err.name === "TokenExpiredError") {
       return res
