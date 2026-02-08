@@ -7,7 +7,6 @@ const ProductPage = () => {
   const location = useLocation();
   const [quantity, setQuantity] = useState(1);
 
-  // will need to change to db request
   const defaultProduct = {
     name: "Product not found",
     price: "Product not found",

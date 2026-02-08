@@ -1,6 +1,5 @@
 import React, { useState, useContext, useEffect } from "react";
 import { AuthContext } from "../context/AuthContext";
-import axios from "axios";
 import api from "../api";
 import { useNavigate } from "react-router-dom";
 
@@ -214,6 +213,7 @@ const Profile = () => {
                       value={firstName}
                       onChange={(e) => setFirstName(e.target.value)}
                       placeholder=""
+                      name="firstName"
                     />
                   </div>
                   <div className="mb-3">
@@ -226,6 +226,7 @@ const Profile = () => {
                       value={lastName}
                       onChange={(e) => setLastName(e.target.value)}
                       placeholder=""
+                      name="lastName"
                     />
                   </div>
                   <div className="mb-4">
@@ -238,6 +239,7 @@ const Profile = () => {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder=""
+                      name="email"
                     />
                   </div>
                   <div className="d-grid">

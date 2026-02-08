@@ -25,19 +25,21 @@ const Register = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    const { password, confirmPassword, email, first_name, last_name } =
+      formData;
     // Validate passwords
-    if (formData.password !== formData.confirmPassword) {
+    if (password !== confirmPassword) {
       alert("Passwords do not match!");
       return;
     }
 
-    if (formData.password.length < 8) {
+    if (password.length < 8) {
       alert("Password must be at least 8 characters long!");
       return;
     }
 
     // Validate email format
-    if (!validator.isEmail(formData.email)) {
+    if (!validator.isEmail(email)) {
       alert("Invalid email format");
       return;
     }
@@ -46,14 +48,14 @@ const Register = () => {
     try {
       await axios.post("http://localhost:3000/api/register", formData);
       console.log("Registration success");
-      navigate("/login");
+      navigate("/"); // will need to check that
     } catch (error) {
       const message = error.response?.data?.message;
 
       if (message) {
-        alert(`Registration failed: ${message}`);
+        alert(`Registration failed: ${message}`); // to change from alert to msg in clinet page
       } else {
-        alert("Registration failed: An unexpected error occurred.");
+        alert("Registration failed: An unexpected error occurred."); // to change from alert to msg in clinet page
       }
     }
   };

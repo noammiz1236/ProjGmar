@@ -39,11 +39,9 @@ api.interceptors.response.use(
       originalRequest._retry = true;
       try {
         // שימוש ב-axios רגיל כאן כדי לא להפעיל את ה-interceptor של עצמנו
-        const res = await axios.post(
-          "http://localhost:3000/api/refresh",
-          {},
-          { withCredentials: true },
-        );
+        const res = await axios.post("http://localhost:3000/api/refresh", {
+          withCredentials: true,
+        });
         const newToken = res.data.accessToken;
         setAccessToken(newToken);
         originalRequest.headers.Authorization = `Bearer ${newToken}`;

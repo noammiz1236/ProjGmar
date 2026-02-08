@@ -7,22 +7,19 @@ export const AuthContext = createContext();
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const hasInitialized = useRef(false);
+  const hasInitialized = useRef(false); // to check if needed
 
   useEffect(() => {
-    // מניעת הרצה כפולה ב-Development (Strict Mode)
     if (hasInitialized.current) return;
-    hasInitialized.current = true;
+    hasInitialized.current = true; // to check if needed
 
     const initAuth = async () => {
       console.log("Checking for existing session...");
       try {
         // ניסיון שקט לחידוש טוקן בעזרת העוגייה
-        const res = await axios.post(
-          "http://localhost:3000/api/refresh",
-          {},
-          { withCredentials: true },
-        );
+        const res = await axios.post("http://localhost:3000/api/refresh", {
+          withCredentials: true,
+        });
 
         // אם הצלחנו (סטטוס 200)
         const token = res.data.accessToken;
@@ -33,7 +30,7 @@ export const AuthProvider = ({ children }) => {
         setUser(userRes.data.user);
         console.log("Session restored successfully");
       } catch (err) {
-        // --- התיקון המרכזי כאן ---
+        // --- התיקון מרכזי כאן ---
         // אם הסטטוס הוא 401 או 403, זה פשוט אומר שהמשתמש לא מחובר (אין עוגייה)
         // אנחנו לא מדפיסים שגיאה (error) אלא רק הודעה רגילה ללוג
         if (err.response?.status === 401 || err.response?.status === 403) {
