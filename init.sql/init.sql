@@ -126,3 +126,42 @@ quantity DECIMAL(10, 2) DEFAULT 1.0,
 price_paid DECIMAL(10, 2),
 purchased_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ============================================
+-- טבלת רשימות קניות
+-- ============================================
+CREATE TABLE app.list (
+  id SERIAL PRIMARY KEY,
+  list_name VARCHAR(255) NOT NULL,
+  status VARCHAR(50) DEFAULT 'active',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================
+-- טבלת חברים ברשימה (אדמינים ומשתתפים)
+-- ============================================
+CREATE TABLE app.list_members (
+  id SERIAL PRIMARY KEY,
+  list_id INT NOT NULL REFERENCES app.list(id) ON DELETE CASCADE,
+  user_id INT NOT NULL REFERENCES app.users(id) ON DELETE CASCADE,
+  status VARCHAR(20) DEFAULT 'member', -- 'admin' or 'member'
+  joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(list_id, user_id)
+);
+
+-- ============================================
+-- טבלת פריטים ברשימה
+-- ============================================
+CREATE TABLE app.list_items (
+  id SERIAL PRIMARY KEY,
+  listId INT NOT NULL REFERENCES app.list(id) ON DELETE CASCADE,
+  itemName VARCHAR(255) NOT NULL,
+  price DECIMAL(10, 2),
+  storeName VARCHAR(255),
+  quantity DECIMAL(10, 2) DEFAULT 1.0,
+  is_checked BOOLEAN DEFAULT FALSE,
+  addby INT REFERENCES app.users(id) ON DELETE SET NULL,
+  addat TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updatedat TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
