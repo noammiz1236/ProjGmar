@@ -17,9 +17,12 @@ export const AuthProvider = ({ children }) => {
       console.log("Checking for existing session...");
       try {
         // ניסיון שקט לחידוש טוקן בעזרת העוגייה
-        const res = await axios.post("http://localhost:3000/api/refresh", {
-          withCredentials: true,
-        });
+        const res = await axios.post(
+          "http://localhost:3000/api/refresh",
+          {}, // body ריק
+          { withCredentials: true } // ← כאן צריך להיות
+        );
+
 
         // אם הצלחנו (סטטוס 200)
         const token = res.data.accessToken;

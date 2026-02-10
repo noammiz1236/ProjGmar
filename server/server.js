@@ -10,7 +10,7 @@ import pg from "pg";
 import nodemailer from "nodemailer";
 
 config();
-const port = 3000;
+const port = process.env.PORT;
 const app = express();
 const saltRounds = 10;
 
@@ -77,6 +77,21 @@ const generateTokens = async (userId) => {
   return { accessToken, refreshToken };
 };
 
+
+const createTransporter = () => {
+  return nodemailer.createTransport({
+    // creating shaliah (transporter)
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT) || 587,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+}
+
+
+
 // Middleware הגדרות כלליות
 app.use(morgan("dev"));
 app.use(express.json());
@@ -90,7 +105,6 @@ app.use(
 );
 
 // ROUTES
-
 // REGISTER
 app.post("/api/register", async (req, res) => {
   const { first_name, last_name, email, password, confirmPassword } = req.body;
@@ -201,7 +215,6 @@ app.post("/api/register", async (req, res) => {
 
 app.get("/api/verify-email", async (req, res) => {
   const token = req.query.token;
-  console.log(token);
   try {
     // בדיקת JWT
     const payload = jwt.verify(token, process.env.JWT_SECRET);
@@ -212,7 +225,7 @@ app.get("/api/verify-email", async (req, res) => {
 
     // בדיקה בטבלת tokens
     const result = await db.query(
-      "SELECT * FROM app2.tokens WHERE id = $1 AND type = 'email_verify'",
+      "SELECT * FROM app2.tokens WHERE id = $1 AND type = 'email_verify' AND expires_at > NOW();",
       [payload.jti],
     );
 
@@ -228,6 +241,7 @@ app.get("/api/verify-email", async (req, res) => {
     if (!tokenRow.data) {
       return res.status(400).json({ message: "Invalid token data" });
     }
+
 
     const userData = JSON.parse(tokenRow.data);
     const { first_name, last_name, email, password_hash } = userData;
@@ -262,15 +276,11 @@ app.get("/api/verify-email", async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      path: "/api/refresh",
+      path: "/",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 ימים במילישניות
     });
 
-    return res.status(200).json({
-      message: "Email verified, account created",
-      user,
-      accessToken,
-    });
+    return res.redirect("http://localhost:5173/verification-confirmed"); // will need to check for debuggiing
   } catch (err) {
     // לוג שיעזור לך להבין בזמן אמת מה קרה
     console.error("JWT Verification Detail:", err.message);
@@ -370,7 +380,7 @@ app.post("/api/refresh", async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      path: "/api/refresh",
+      path: "/",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
@@ -476,8 +486,10 @@ app.get("/api/store", async (req, res) => {
   }
 });
 
+
+
+// password change only if user logged in!!!!
 app.put("/api/user/password", authenticateToken, async (req, res) => {
-  // password change only if user logged in!!!!
   const userId = req.userId;
   const { currentPassword, newPassword, confirmNewPassword } = req.body;
 
@@ -522,6 +534,118 @@ app.put("/api/user/password", authenticateToken, async (req, res) => {
     return res.status(500).json({ message: "Error updating password" });
   }
 });
+
+
+
+app.post("/api/forgot-password", async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ message: "Email is required" });
+  }
+  if (!validator.isEmail(email)) {
+    return res.status(400).json({ message: "Invalid email format" });
+  }
+  try {
+    const results = await db.query("SELECT id FROM app2.users WHERE email = $1", [email])
+    if (results.rows.length === 0) {
+      return res.status(404).json({ message: "User not found" })
+    }
+    const userId = results.rows[0].id;
+    const { rows } = await db.query(`INSERT INTO app2.tokens 
+      (user_id,type,expires_at,used,data)
+      VALUES($1,'reset_password',NOW() + interval '15 minutes',false,NULL) RETURNING ID`,
+      [userId])
+    const tokenId = rows[0].id;
+    const token = jwt.sign(
+      {
+        sub: userId,
+        jti: tokenId,
+        type: 'reset_password'
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: '15m'
+      }
+    )
+    const resetUrl = `http://localhost:5173/reset-password?token=${token}`;
+    // send email
+    const transporter = createTransporter();
+    await transporter.sendMail({
+      from: `"SmartCart" <${process.env.SMTP_USER}>`,
+      to: email,
+      subject: "Reset your password",
+      html: `<p>Click <a href="${resetUrl}">here</a> to reset your password</p>`,
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Error resetting password" });
+
+  }
+})
+
+
+app.post("/api/reset-password", async (req, res) => {
+  const { token, newPassword, confirmNewPassword } = req.body
+  console.log(token)
+  if (!token || !newPassword || !confirmNewPassword) {
+    return res.status(400).json({ message: "Missing fields" });
+  }
+  if (newPassword !== confirmNewPassword) {
+    return res.status(400).json({ message: "Passwords do not match" });
+  }
+  if (newPassword.length < 8) {
+    return res.status(400).json({ message: "Password too weak" });
+  }
+  try {
+
+    const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decodedToken.sub;
+    const { rows } = await db.query(
+      `SELECT expires_at, used 
+   FROM app2.tokens 
+   WHERE user_id = $1 AND type = 'reset_password' AND id = $2 AND expires_at > NOW()`,
+      [userId, decodedToken.jti]
+    );
+    if (rows.length === 0) {
+      return res.status(404).json({ message: "Token not found" });
+    }
+    const tokenData = rows[0];
+
+    if (tokenData.used) {
+      return res.status(400).json({ message: "Token already used" });
+    }
+
+
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    const results = await db.query(`SELECT password_hash FROM app2.users WHERE id = $1`, [userId]);
+    if (results.rows.length === 0) {
+      return res.status(404).json({ message: "Token not found" });
+    }
+
+    const oldPassword = results.rows[0].password_hash;
+    if (oldPassword === hashedPassword) {
+      return res.status(400).json({ message: "New password must differ from current" });
+    }
+
+
+    await db.query(`UPDATE app2.users SET password_hash = $1 WHERE id = $2`, [hashedPassword, userId]);
+
+    await db.query(`UPDATE app2.tokens SET used = true WHERE id = $1`, [decodedToken.jti]);
+
+    return res.status(200).json({ message: "Password reset successfully" });
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Error resetting password" });
+  }
+})
+
+
+
+
+
+
 
 // פונקציה לניקוי טוקנים שפג תוקפם (רצה פעם ביום)
 // const cleanupExpiredTokens = async () => {

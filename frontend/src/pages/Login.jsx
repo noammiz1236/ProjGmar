@@ -43,6 +43,9 @@ const Login = () => {
         alert("Login failed: An unexpected error occurred.");
       }
     }
+    finally {
+      navigate("/");
+    }
   };
 
   return (
@@ -95,6 +98,12 @@ const Login = () => {
                     אין לך חשבון?{" "}
                     <a href="/register" className="text-primary fw-bold">
                       הירשם כאן
+                    </a>
+                  </p>
+                  <p>
+                    שכחתי סיסמה?{" "}
+                    <a href="/forgot-password" className="text-primary fw-bold">
+                      לחץ כאן
                     </a>
                   </p>
                 </div>

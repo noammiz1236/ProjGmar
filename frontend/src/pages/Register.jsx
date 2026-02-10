@@ -32,7 +32,10 @@ const Register = () => {
       alert("Passwords do not match!");
       return;
     }
-
+    if (first_name.length < 2 && last_name.length < 2) {
+      alert("Name must be at least 2 characters long!");
+      return;
+    }
     if (password.length < 8) {
       alert("Password must be at least 8 characters long!");
       return;
@@ -48,7 +51,6 @@ const Register = () => {
     try {
       await axios.post("http://localhost:3000/api/register", formData);
       console.log("Registration success");
-      navigate("/"); // will need to check that
     } catch (error) {
       const message = error.response?.data?.message;
 
@@ -57,6 +59,9 @@ const Register = () => {
       } else {
         alert("Registration failed: An unexpected error occurred."); // to change from alert to msg in clinet page
       }
+    }
+    finally {
+      navigate("/");
     }
   };
 
