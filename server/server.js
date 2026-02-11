@@ -756,12 +756,12 @@ io.on("connection", (socket) => {
     if (!list_name || !userId)
       return callback({ success: false, error: `missing data` });
     try {
-      const listRes = await client.query(
+      const listRes = await db.query(
         `INSERT INTO app.list (list_name) VALUES ($1) RETURNING id`,
         [list_name],
       );
       const newListId = listRes.rows[0].id;
-      await client.query(
+      await db.query(
         `INSERT INTO app.list_members (list_id, user_id, status) VALUES ($1, $2, $3)`,
         [newListId, userId, "admin"],
       );
@@ -770,6 +770,29 @@ io.on("connection", (socket) => {
       console.error(e);
       callback({ success: false, msg: `db eror` });
     }
+    socket.on("user_joined", async (data, callback) => {
+      const listId = data.listid;
+      const userId = data.user_id;
+      try {
+        const checkQuery = await db.query(
+          `SELECT * FROM app.list_users WHERE list_id = $1 AND user_id = $2`,
+          [listId, userId],
+        );
+        if (checkQuery.rows.length === 0) {
+          await db.query(
+            `INSERT INTO app.list_users (list_id, user_id) VALUES ($1, $2)`,
+            [listId, userId],
+          );
+        }
+        socket.join(listId);
+        socket.to(listId).emit("notification", {
+          message: `משתמש חדש הצטרף לרשימה!`,
+          userId: userId,
+        });
+      } catch (e) {
+        callback({ success: false, msg: `db eror` });
+      }
+    });
   });
 });
 

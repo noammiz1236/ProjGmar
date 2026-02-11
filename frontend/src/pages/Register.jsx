@@ -49,7 +49,7 @@ const Register = () => {
 
     // Send request
     try {
-      await axios.post("http://localhost:3000/api/register", formData);
+      await axios.post("http://localhost:5000/api/register", formData);
       console.log("Registration success");
     } catch (error) {
       const message = error.response?.data?.message;

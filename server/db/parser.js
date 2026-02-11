@@ -18,8 +18,7 @@ export async function ParceStoreFile(xmlpath) {
   return new Promise((resolve, reject) => {
     const rawStream = fs
       .createReadStream(xmlpath)
-      .pipe(iconv.decodeStream("utf16le"))
-      .pipe(iconv.encodeStream("utf8"));
+      .pipe(iconv.decodeStream("utf16le"));
     const xmlStream = new XmlStream(rawStream);
 
     let currentChainId = null;

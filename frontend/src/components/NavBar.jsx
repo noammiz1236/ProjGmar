@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import "./NavBar.css";
 import { AuthContext } from "../context/AuthContext";
 import api from "../api";
+import { useEffect } from "react";
 
 const NavBar = () => {
   const { user, setUser, loading } = useContext(AuthContext);
@@ -10,13 +11,28 @@ const NavBar = () => {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [results, setResults] = useState([]);
 
   const handleSearchChange = (e) => setSearchQuery(e.target.value);
-
-  const handleSearchSubmit = (e) => {
-    e.preventDefault();
-    console.log("Searching for:", searchQuery);
-  };
+  useEffect(() => {
+    const handleSearchSubmit = setTimeout(async () => {
+      if (!searchQuery || searchQuery.trim().length < 2) {
+        setResults([]);
+        return;
+      }
+      try {
+        const { data } = await api.get("/api/search", {
+          params: { q: searchQuery },
+        });
+        setResults(data);
+        console.log("תוצאות שהתקבלו:", data);
+      } catch (err) {
+        console.error("שגיאה בשליפת הנתונים:", err);
+        setResults([]);
+      }
+    }, 500);
+    return () => clearTimeout(handleSearchSubmit);
+  }, [searchQuery]);
 
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
   const closeSidebar = () => setSidebarOpen(false);
@@ -36,7 +52,7 @@ const NavBar = () => {
       <nav className="navbar navbar-expand-lg navbar-light bg-light shadow-sm sticky-top">
         <div className="container-fluid px-4">
           <Link className="navbar-brand fw-bold fs-5" to="/">
-            MyStore
+            SmartCart
           </Link>
 
           <button
@@ -53,16 +69,13 @@ const NavBar = () => {
           <div className="navbar-collapse d-none d-lg-flex" id="navbarContent">
             <ul className="navbar-nav mx-auto align-items-center gap-3">
               <li className="nav-item">
-                <Link className="btn btn-outline-primary fw-bold" to="/store">
-                  Store
+                <Link className="btn btn-outline-primary fw-bold" to="/list">
+                  My Lists
                 </Link>
               </li>
 
               <li className="nav-item">
-                <form
-                  className="d-flex my-2 my-lg-0"
-                  onSubmit={handleSearchSubmit}
-                >
+                <form className="d-flex my-2 my-lg-0 position-relative">
                   <input
                     className="form-control form-control-sm me-2"
                     type="search"
@@ -71,9 +84,15 @@ const NavBar = () => {
                     onChange={handleSearchChange}
                     style={{ width: "280px" }}
                   />
-                  <button className="btn btn-primary btn-sm" type="submit">
-                    Go
-                  </button>
+                  {results.length > 0 && (
+                    <ul className="search-results-dropdown">
+                      {results.map((item) => (
+                        <li key={item.id} className="search-result-item">
+                          {item.name}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </form>
               </li>
             </ul>
@@ -152,7 +171,7 @@ const NavBar = () => {
       <div className={`mobile-sidebar ${sidebarOpen ? "open" : ""}`}>
         <ul>
           <li className="search-bar-item">
-            <form onSubmit={handleSearchSubmit} className="search-bar-form">
+            <form className="search-bar-form">
               <input
                 className="form-control form-control-sm"
                 type="search"
