@@ -1,10 +1,12 @@
 import React, { useState, useContext } from "react";
 import validator from "validator";
-import api from "../api";
+import api, { setAccessToken } from "../api"; // ייבוא ה-api והפונקציה לעדכון הטוקן
 import { AuthContext } from "../context/AuthContext";
+import { useNavigate } from "react-router-dom"; // הוספתי למקרה שתרצה להעביר דף אחרי לוגין
 
 const Login = () => {
   const { setUser } = useContext(AuthContext);
+  const navigate = useNavigate();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -12,6 +14,7 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    // וולידציות מקוריות שלך
     if (password.length < 8) {
       alert("Password must be at least 8 characters long!");
       return;
@@ -23,9 +26,14 @@ const Login = () => {
     }
 
     try {
+      // שליחת הבקשה לשרת
       const res = await api.post("/api/login", { email, password });
 
-      // חשוב: setUser מהתשובה של /login
+      // --- השדרוג המודרני ---
+      // 1. שמירת ה-Access Token בזיכרון של קובץ ה-api
+      setAccessToken(res.data.accessToken);
+
+      // 2. עדכון ה-User ב-Context (מכיל id, first_name, email וכו')
       setUser(res.data.user);
     } catch (err) {
       const message = err.response?.data?.message;
@@ -34,6 +42,9 @@ const Login = () => {
       } else {
         alert("Login failed: An unexpected error occurred.");
       }
+    }
+    finally {
+      navigate("/");
     }
   };
 
@@ -44,18 +55,18 @@ const Login = () => {
           <div className="col-md-6">
             <div className="card shadow">
               <div className="card-body p-5">
-                <h2 className="card-title text-center mb-4">Login</h2>
+                <h2 className="card-title text-center mb-4">התחברות</h2>
 
                 <form onSubmit={handleSubmit}>
                   <div className="mb-3">
                     <label htmlFor="email" className="form-label">
-                      Email Address
+                      אימייל
                     </label>
                     <input
                       type="email"
                       className="form-control"
                       id="email"
-                      placeholder="Enter your email"
+                      placeholder="הכנס אימייל"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       required
@@ -64,13 +75,13 @@ const Login = () => {
 
                   <div className="mb-3">
                     <label htmlFor="password" className="form-label">
-                      Password
+                      סיסמה
                     </label>
                     <input
                       type="password"
                       className="form-control"
                       id="password"
-                      placeholder="Enter your password"
+                      placeholder="הכנס סיסמה"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
@@ -78,15 +89,21 @@ const Login = () => {
                   </div>
 
                   <button type="submit" className="btn btn-primary w-100 mb-3">
-                    Login
+                    התחברות
                   </button>
                 </form>
 
                 <div className="text-center">
                   <p className="mb-0">
-                    Don't have an account?{" "}
+                    אין לך חשבון?{" "}
                     <a href="/register" className="text-primary fw-bold">
-                      Register here
+                      הירשם כאן
+                    </a>
+                  </p>
+                  <p>
+                    שכחתי סיסמה?{" "}
+                    <a href="/forgot-password" className="text-primary fw-bold">
+                      לחץ כאן
                     </a>
                   </p>
                 </div>

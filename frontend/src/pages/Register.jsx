@@ -6,8 +6,8 @@ import { useNavigate } from "react-router-dom";
 
 const Register = () => {
   const [formData, setFormData] = useState({
-    firstName: "",
-    lastName: "",
+    first_name: "",
+    last_name: "",
     email: "",
     password: "",
     confirmPassword: "",
@@ -25,19 +25,24 @@ const Register = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    const { password, confirmPassword, email, first_name, last_name } =
+      formData;
     // Validate passwords
-    if (formData.password !== formData.confirmPassword) {
+    if (password !== confirmPassword) {
       alert("Passwords do not match!");
       return;
     }
-
-    if (formData.password.length < 8) {
+    if (first_name.length < 2 && last_name.length < 2) {
+      alert("Name must be at least 2 characters long!");
+      return;
+    }
+    if (password.length < 8) {
       alert("Password must be at least 8 characters long!");
       return;
     }
 
     // Validate email format
-    if (!validator.isEmail(formData.email)) {
+    if (!validator.isEmail(email)) {
       alert("Invalid email format");
       return;
     }
@@ -46,15 +51,17 @@ const Register = () => {
     try {
       await axios.post("http://localhost:3000/api/register", formData);
       console.log("Registration success");
-      navigate("/login");
     } catch (error) {
       const message = error.response?.data?.message;
 
       if (message) {
-        alert(`Registration failed: ${message}`);
+        alert(`Registration failed: ${message}`); // to change from alert to msg in clinet page
       } else {
-        alert("Registration failed: An unexpected error occurred.");
+        alert("Registration failed: An unexpected error occurred."); // to change from alert to msg in clinet page
       }
+    }
+    finally {
+      navigate("/");
     }
   };
 
@@ -65,21 +72,21 @@ const Register = () => {
           <div className="col-md-6">
             <div className="card shadow">
               <div className="card-body p-5">
-                <h2 className="card-title text-center mb-4">Register</h2>
+                <h2 className="card-title text-center mb-4">הרשמה</h2>
 
                 <form onSubmit={handleSubmit}>
                   {/* First Name */}
                   <div className="mb-3">
                     <label htmlFor="firstName" className="form-label">
-                      First Name
+                      שם פרטי
                     </label>
                     <input
                       type="text"
                       className="form-control"
                       id="firstName"
-                      name="firstName"
-                      placeholder="Enter your first name"
-                      value={formData.firstName}
+                      name="first_name"
+                      placeholder="הכנס שם פרטי"
+                      value={formData.first_name}
                       onChange={handleChange}
                       required
                     />
@@ -88,15 +95,15 @@ const Register = () => {
                   {/* Last Name */}
                   <div className="mb-3">
                     <label htmlFor="lastName" className="form-label">
-                      Last Name
+                      שם משפחה
                     </label>
                     <input
                       type="text"
                       className="form-control"
                       id="lastName"
-                      name="lastName"
-                      placeholder="Enter your last name"
-                      value={formData.lastName}
+                      name="last_name"
+                      placeholder="הכנס שם משפחה"
+                      value={formData.last_name}
                       onChange={handleChange}
                       required
                     />
@@ -105,14 +112,14 @@ const Register = () => {
                   {/* Email */}
                   <div className="mb-3">
                     <label htmlFor="email" className="form-label">
-                      Email Address
+                      אימייל
                     </label>
                     <input
                       type="email"
                       className="form-control"
                       id="email"
                       name="email"
-                      placeholder="Enter your email"
+                      placeholder="הכנס אימייל"
                       value={formData.email}
                       onChange={handleChange}
                       required
@@ -122,14 +129,14 @@ const Register = () => {
                   {/* Password */}
                   <div className="mb-3">
                     <label htmlFor="password" className="form-label">
-                      Password
+                      סיסמה
                     </label>
                     <input
                       type="password"
                       className="form-control"
                       id="password"
                       name="password"
-                      placeholder="Enter your password"
+                      placeholder="הכנס סיסמה"
                       value={formData.password}
                       onChange={handleChange}
                       required
@@ -139,14 +146,14 @@ const Register = () => {
                   {/* Confirm Password */}
                   <div className="mb-3">
                     <label htmlFor="confirmPassword" className="form-label">
-                      Confirm Password
+                      אימות סיסמה
                     </label>
                     <input
                       type="password"
                       className="form-control"
                       id="confirmPassword"
                       name="confirmPassword"
-                      placeholder="Confirm your password"
+                      placeholder="אימות סיסמה"
                       value={formData.confirmPassword}
                       onChange={handleChange}
                       required
@@ -155,16 +162,16 @@ const Register = () => {
 
                   {/* Submit Button */}
                   <button type="submit" className="btn btn-primary w-100 mb-3">
-                    Register
+                    הרשמה
                   </button>
                 </form>
 
                 {/* Login Link */}
                 <div className="text-center">
                   <p className="mb-0">
-                    Already have an account?{" "}
+                    כבר יש לך חשבון?{" "}
                     <Link to="/login" className="text-primary fw-bold">
-                      Login here
+                      התחבר כאן
                     </Link>
                   </p>
                 </div>

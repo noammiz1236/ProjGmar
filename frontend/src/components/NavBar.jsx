@@ -87,6 +87,11 @@ const NavBar = () => {
                     </span>
                   </li>
                   <li className="nav-item">
+                    <Link className="btn btn-outline-secondary" to="/profile">
+                      <i className="bi bi-gear-fill me-1"></i> Settings
+                    </Link>
+                  </li>
+                  <li className="nav-item">
                     <button
                       className="btn btn-outline-danger"
                       onClick={handleLogout}
@@ -129,7 +134,7 @@ const NavBar = () => {
                     <circle cx="20" cy="21" r="1"></circle>
                     <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
                   </svg>
-                  <span className="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+                  <span className="position-absolute top-0 end-100 translate-middle badge rounded-pill bg-danger">
                     0
                   </span>
                 </Link>
@@ -175,6 +180,15 @@ const NavBar = () => {
             <>
               <li>
                 <span className="text-primary">{user.first_name}</span>
+              </li>
+              <li>
+                <Link
+                  className="btn btn-outline-secondary w-100 my-2"
+                  to="/profile"
+                  onClick={closeSidebar}
+                >
+                  <i className="bi bi-gear-fill me-1"></i> Settings
+                </Link>
               </li>
               <li>
                 <button
@@ -231,7 +245,7 @@ const NavBar = () => {
                 <circle cx="20" cy="21" r="1"></circle>
                 <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
               </svg>
-              <span className="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger">
+              <span className="position-absolute top-0 end-100 translate-middle badge rounded-pill bg-danger">
                 0
               </span>
             </Link>
