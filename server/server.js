@@ -375,7 +375,8 @@ app.post("/api/login", async (req, res) => {
 
 // REFRESH
 app.post("/api/refresh", async (req, res) => {
-  const incomingToken = req.cookies.refreshToken;
+  // Accept refresh token from cookie (web) OR body (mobile app)
+  const incomingToken = req.cookies.refreshToken || req.body.refreshToken;
   if (!incomingToken) return res.status(401).json({ message: "Unauthorized" });
 
   try {
@@ -408,7 +409,7 @@ app.post("/api/refresh", async (req, res) => {
     // יצירת tokens חדשים
     const { accessToken, refreshToken } = await generateTokens(payload.sub);
 
-    // Cookie
+    // Cookie (for web)
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -417,7 +418,8 @@ app.post("/api/refresh", async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    return res.json({ accessToken });
+    // Return both tokens (mobile app needs refreshToken in body)
+    return res.json({ accessToken, refreshToken });
   } catch (err) {
     return res.status(403).json({ message: "Invalid refresh token" });
   }
@@ -427,13 +429,13 @@ app.post("/api/refresh", async (req, res) => {
 app.get("/api/me", authenticateToken, async (req, res) => {
   try {
     const results = await db.query(
-      "SELECT id, first_name, last_name, email FROM app2.users WHERE id = $1",
+      "SELECT id, first_name, last_name, email, username, parent_id FROM app2.users WHERE id = $1",
       [req.userId],
     );
 
     if (results.rows.length === 0) return res.status(404).json({ user: null });
 
-    return res.status(200).json({ user: results.rows[0] }); // id, first_name, last_name, email returns all user data
+    return res.status(200).json({ user: results.rows[0] });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: "Server error" });
