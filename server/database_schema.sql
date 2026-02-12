@@ -1,204 +1,288 @@
--- SmartCart Database Schema
--- PostgreSQL Database Schema
--- Created: 2026-02-07
+-- ============================================
+-- SmartCart Production Database Schema
+-- ============================================
+-- This file is safe to run on an existing database
+-- Uses IF NOT EXISTS to avoid destroying data
+-- Run with: psql -U username -d database_name -f deploy.sql
+-- ============================================
 
--- Drop existing schema if needed (uncomment to reset database)
--- DROP SCHEMA IF EXISTS app2 CASCADE;
-
--- Create schema
+-- Create schemas
+CREATE SCHEMA IF NOT EXISTS app;
 CREATE SCHEMA IF NOT EXISTS app2;
 
--- Set search path
-SET search_path TO app2;
+-- ============================================
+-- SCHEMA: app
+-- Used by: parser.js (XML data import), socket.io (shopping lists)
+-- ============================================
 
--- =====================================================
--- USERS TABLE
--- Stores user account information
--- =====================================================
+-- Retail chains (populated by parser)
+CREATE TABLE IF NOT EXISTS app.chains (
+  id BIGINT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL UNIQUE,
+  logo_url VARCHAR(255),
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Sub-chains within retail chains
+CREATE TABLE IF NOT EXISTS app.sub_chains (
+  id INT PRIMARY KEY,
+  chain_id BIGINT NOT NULL REFERENCES app.chains(id) ON DELETE CASCADE,
+  name VARCHAR(255),
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Store branch locations
+CREATE TABLE IF NOT EXISTS app.branches (
+  id INT PRIMARY KEY,
+  chain_id BIGINT NOT NULL REFERENCES app.chains(id) ON DELETE CASCADE,
+  sub_chain_id INT REFERENCES app.sub_chains(id) ON DELETE SET NULL,
+  branch_name VARCHAR(255),
+  address VARCHAR(255),
+  city VARCHAR(100),
+  latitude DECIMAL(9, 6),
+  longitude DECIMAL(9, 6),
+  bikoret_no INT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Products (populated by parser from XML feeds)
+CREATE TABLE IF NOT EXISTS app.items (
+  id SERIAL PRIMARY KEY,
+  item_code VARCHAR(50) NOT NULL,
+  barcode VARCHAR(50),
+  name VARCHAR(255) NOT NULL,
+  manufacturer VARCHAR(255),
+  manufacturer_country VARCHAR(100),
+  description VARCHAR(500),
+  category VARCHAR(100),
+  unit_qty VARCHAR(50),
+  is_weighted BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(item_code, manufacturer, is_weighted)
+);
+
+-- Item prices per branch (updated by parser)
+CREATE TABLE IF NOT EXISTS app.prices (
+  id SERIAL PRIMARY KEY,
+  item_id INT NOT NULL REFERENCES app.items(id) ON DELETE CASCADE,
+  branch_id INT NOT NULL REFERENCES app.branches(id) ON DELETE CASCADE,
+  price DECIMAL(10, 2) NOT NULL,
+  unit_price DECIMAL(10, 4),
+  item_status INT,
+  allow_discount BOOLEAN DEFAULT TRUE,
+  bikoret_no INT,
+  price_update_time TIMESTAMP,
+  last_sale_datetime TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(item_id, branch_id)
+);
+
+-- Shopping lists
+CREATE TABLE IF NOT EXISTS app.list (
+  id SERIAL PRIMARY KEY,
+  list_name VARCHAR(255) NOT NULL,
+  status VARCHAR(50) DEFAULT 'active',
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- List members with roles (admin/member)
+CREATE TABLE IF NOT EXISTS app.list_members (
+  id SERIAL PRIMARY KEY,
+  list_id INT NOT NULL REFERENCES app.list(id) ON DELETE CASCADE,
+  user_id INT NOT NULL,
+  status VARCHAR(20) DEFAULT 'member',
+  joined_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(list_id, user_id)
+);
+
+-- Items in shopping lists
+CREATE TABLE IF NOT EXISTS app.list_items (
+  id SERIAL PRIMARY KEY,
+  listId INT NOT NULL REFERENCES app.list(id) ON DELETE CASCADE,
+  itemName VARCHAR(255) NOT NULL,
+  price DECIMAL(10, 2),
+  storeName VARCHAR(255),
+  quantity DECIMAL(10, 2) DEFAULT 1.0,
+  is_checked BOOLEAN DEFAULT FALSE,
+  addby INT,
+  paid_by INT,
+  paid_at TIMESTAMP,
+  note TEXT,
+  product_id INT REFERENCES app.items(id) ON DELETE SET NULL,
+  addat TIMESTAMP DEFAULT NOW(),
+  updatedat TIMESTAMP DEFAULT NOW()
+);
+
+-- List users (legacy table for socket.io tracking)
+CREATE TABLE IF NOT EXISTS app.list_users (
+  id SERIAL PRIMARY KEY,
+  list_id INT NOT NULL REFERENCES app.list(id) ON DELETE CASCADE,
+  user_id INT NOT NULL,
+  joined_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE(list_id, user_id)
+);
+
+-- Comments on list items
+CREATE TABLE IF NOT EXISTS app.list_item_comments (
+  id SERIAL PRIMARY KEY,
+  item_id INT NOT NULL REFERENCES app.list_items(id) ON DELETE CASCADE,
+  user_id INT NOT NULL,
+  comment TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Invite links for joining lists
+CREATE TABLE IF NOT EXISTS app.list_invites (
+  id SERIAL PRIMARY KEY,
+  list_id INT NOT NULL REFERENCES app.list(id) ON DELETE CASCADE,
+  invite_code VARCHAR(64) NOT NULL UNIQUE,
+  created_by INT NOT NULL,
+  expires_at TIMESTAMP,
+  max_uses INT,
+  use_count INT DEFAULT 0,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Saved template lists
+CREATE TABLE IF NOT EXISTS app.list_templates (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL,
+  template_name VARCHAR(255) NOT NULL,
+  source_list_id INT REFERENCES app.list(id) ON DELETE SET NULL,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Items in template lists
+CREATE TABLE IF NOT EXISTS app.template_items (
+  id SERIAL PRIMARY KEY,
+  template_id INT NOT NULL REFERENCES app.list_templates(id) ON DELETE CASCADE,
+  item_name VARCHAR(255) NOT NULL,
+  quantity DECIMAL(10, 2) DEFAULT 1.0,
+  note TEXT,
+  sort_order INT DEFAULT 0
+);
+
+-- ============================================
+-- SCHEMA: app2
+-- Used by: server.js (auth, store API, family management)
+-- ============================================
+
+-- User accounts with parent-child relationships
 CREATE TABLE IF NOT EXISTS app2.users (
-    id SERIAL PRIMARY KEY,
-    first_name VARCHAR(100) NOT NULL,
-    last_name VARCHAR(100) NOT NULL,
-    email VARCHAR(255) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
-    email_verified_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+  id SERIAL PRIMARY KEY,
+  first_name VARCHAR(100) NOT NULL,
+  last_name VARCHAR(100),
+  username VARCHAR(100) UNIQUE,
+  email VARCHAR(255) UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  parent_id INT REFERENCES app2.users(id) ON DELETE CASCADE,
+  email_verified_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
 );
 
--- Index for faster email lookups
-CREATE INDEX IF NOT EXISTS idx_users_email ON app2.users(email);
-
--- =====================================================
--- TOKENS TABLE
--- Stores authentication and verification tokens
--- =====================================================
+-- Auth tokens (refresh, email_verify, reset_password)
 CREATE TABLE IF NOT EXISTS app2.tokens (
-    id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES app2.users(id) ON DELETE CASCADE,
-    type VARCHAR(50) NOT NULL, -- 'refresh', 'email_verify', 'access'
-    expires_at TIMESTAMP NOT NULL,
-    used BOOLEAN DEFAULT FALSE,
-    data TEXT, -- JSON data for storing sensitive information (e.g., registration data)
-    created_at TIMESTAMP DEFAULT NOW()
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES app2.users(id) ON DELETE CASCADE,
+  type VARCHAR(50) NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  used BOOLEAN DEFAULT FALSE,
+  data TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Indexes for token queries
+-- Kid requests (children request items for parent approval)
+CREATE TABLE IF NOT EXISTS app2.kid_requests (
+  id SERIAL PRIMARY KEY,
+  child_id INT NOT NULL REFERENCES app2.users(id) ON DELETE CASCADE,
+  parent_id INT NOT NULL REFERENCES app2.users(id) ON DELETE CASCADE,
+  list_id INT NOT NULL REFERENCES app.list(id) ON DELETE CASCADE,
+  item_name VARCHAR(255) NOT NULL,
+  price DECIMAL(10, 2),
+  store_name VARCHAR(255),
+  quantity DECIMAL(10, 2) DEFAULT 1.0,
+  status VARCHAR(20) DEFAULT 'pending',
+  resolved_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT NOW(),
+  product_id INT REFERENCES app.items(id) ON DELETE SET NULL
+);
+
+-- ============================================
+-- INDEXES FOR PERFORMANCE
+-- ============================================
+
+-- app schema indexes
+CREATE INDEX IF NOT EXISTS idx_prices_item ON app.prices(item_id);
+CREATE INDEX IF NOT EXISTS idx_prices_branch ON app.prices(branch_id);
+CREATE INDEX IF NOT EXISTS idx_prices_update_time ON app.prices(price_update_time);
+CREATE INDEX IF NOT EXISTS idx_list_items_listid ON app.list_items("listid");
+CREATE INDEX IF NOT EXISTS idx_list_items_product_id ON app.list_items(product_id);
+CREATE INDEX IF NOT EXISTS idx_item_comments_item ON app.list_item_comments(item_id);
+CREATE INDEX IF NOT EXISTS idx_invites_code ON app.list_invites(invite_code);
+CREATE INDEX IF NOT EXISTS idx_templates_user ON app.list_templates(user_id);
+CREATE INDEX IF NOT EXISTS idx_template_items_template ON app.template_items(template_id);
+CREATE INDEX IF NOT EXISTS idx_items_barcode ON app.items(barcode);
+CREATE INDEX IF NOT EXISTS idx_items_name ON app.items(name);
+
+-- app2 schema indexes
+CREATE INDEX IF NOT EXISTS idx_users_email ON app2.users(email);
+CREATE INDEX IF NOT EXISTS idx_users_username ON app2.users(username);
+CREATE INDEX IF NOT EXISTS idx_users_parent ON app2.users(parent_id);
 CREATE INDEX IF NOT EXISTS idx_tokens_user_id ON app2.tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_tokens_type ON app2.tokens(type);
 CREATE INDEX IF NOT EXISTS idx_tokens_expires_at ON app2.tokens(expires_at);
 CREATE INDEX IF NOT EXISTS idx_tokens_user_type ON app2.tokens(user_id, type);
+CREATE INDEX IF NOT EXISTS idx_kid_requests_parent_pending ON app2.kid_requests(parent_id, status);
+CREATE INDEX IF NOT EXISTS idx_kid_requests_child ON app2.kid_requests(child_id);
 
--- Add comment to document the data column
-COMMENT ON COLUMN app2.tokens.data IS 'Stores JSON data for tokens that need to carry additional information securely (e.g., user registration data during email verification)';
+-- ============================================
+-- TRIGGERS FOR AUTO-UPDATES
+-- ============================================
 
--- =====================================================
--- CHAINS TABLE
--- Stores retail chain information
--- =====================================================
-CREATE TABLE IF NOT EXISTS app2.chains (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Index for chain name searches
-CREATE INDEX IF NOT EXISTS idx_chains_name ON app2.chains(name);
-
--- =====================================================
--- BRANCHES TABLE
--- Stores individual branch/store locations
--- =====================================================
-CREATE TABLE IF NOT EXISTS app2.branches (
-    id SERIAL PRIMARY KEY,
-    chain_id INTEGER NOT NULL REFERENCES app2.chains(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    address TEXT,
-    city VARCHAR(100),
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Index for branch queries
-CREATE INDEX IF NOT EXISTS idx_branches_chain_id ON app2.branches(chain_id);
-
--- =====================================================
--- ITEMS TABLE
--- Stores product/item information
--- =====================================================
-CREATE TABLE IF NOT EXISTS app2.items (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    category VARCHAR(100),
-    created_at TIMESTAMP DEFAULT NOW()
-);
-
--- Index for item name searches
-CREATE INDEX IF NOT EXISTS idx_items_name ON app2.items(name);
-CREATE INDEX IF NOT EXISTS idx_items_category ON app2.items(category);
-
--- =====================================================
--- PRICES TABLE
--- Stores pricing information for items at different branches
--- =====================================================
-CREATE TABLE IF NOT EXISTS app2.prices (
-    id SERIAL PRIMARY KEY,
-    item_id INTEGER NOT NULL REFERENCES app2.items(id) ON DELETE CASCADE,
-    branch_id INTEGER NOT NULL REFERENCES app2.branches(id) ON DELETE CASCADE,
-    price DECIMAL(10, 2) NOT NULL,
-    updated_at TIMESTAMP DEFAULT NOW(),
-    -- Ensure one price per item per branch
-    UNIQUE(item_id, branch_id)
-);
-
--- Indexes for price queries
-CREATE INDEX IF NOT EXISTS idx_prices_item_id ON app2.prices(item_id);
-CREATE INDEX IF NOT EXISTS idx_prices_branch_id ON app2.prices(branch_id);
-CREATE INDEX IF NOT EXISTS idx_prices_price ON app2.prices(price);
-
--- =====================================================
--- TRIGGER: Update timestamp on users table
--- =====================================================
+-- Auto-update updated_at column on users table
 CREATE OR REPLACE FUNCTION app2.update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
+  NEW.updated_at = NOW();
+  RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS update_users_updated_at ON app2.users;
 CREATE TRIGGER update_users_updated_at
-    BEFORE UPDATE ON app2.users
-    FOR EACH ROW
-    EXECUTE FUNCTION app2.update_updated_at_column();
+  BEFORE UPDATE ON app2.users
+  FOR EACH ROW
+  EXECUTE FUNCTION app2.update_updated_at_column();
 
--- =====================================================
--- SAMPLE DATA (Optional - uncomment if needed)
--- =====================================================
+-- Auto-update updated_at on list table
+CREATE OR REPLACE FUNCTION app.update_list_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
--- Insert sample chains
--- INSERT INTO app2.chains (name) VALUES 
---     ('Shufersal'),
---     ('Rami Levy'),
---     ('Mega'),
---     ('Yeinot Bitan');
+DROP TRIGGER IF EXISTS update_list_updated_at ON app.list;
+CREATE TRIGGER update_list_updated_at
+  BEFORE UPDATE ON app.list
+  FOR EACH ROW
+  EXECUTE FUNCTION app.update_list_updated_at();
 
--- Insert sample branches
--- INSERT INTO app2.branches (chain_id, name, city) VALUES 
---     (1, 'Shufersal Tel Aviv Center', 'Tel Aviv'),
---     (1, 'Shufersal Haifa', 'Haifa'),
---     (2, 'Rami Levy Jerusalem', 'Jerusalem'),
---     (2, 'Rami Levy Beer Sheva', 'Beer Sheva');
-
--- Insert sample items
--- INSERT INTO app2.items (name, category) VALUES 
---     ('Milk 1L', 'Dairy'),
---     ('Bread', 'Bakery'),
---     ('Eggs 12 pack', 'Dairy'),
---     ('Olive Oil 1L', 'Pantry');
-
--- Insert sample prices
--- INSERT INTO app2.prices (item_id, branch_id, price) VALUES 
---     (1, 1, 5.90),
---     (1, 2, 5.80),
---     (1, 3, 6.20),
---     (2, 1, 4.50),
---     (2, 3, 4.20);
-
--- =====================================================
--- PERMISSIONS (Optional - adjust as needed)
--- =====================================================
-
--- Grant permissions to app2 user if needed
--- GRANT ALL PRIVILEGES ON SCHEMA app2 TO admin;
--- GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA app2 TO admin;
--- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA app2 TO admin;
-
--- =====================================================
--- VIEWS (Optional helper views)
--- =====================================================
-
--- View to get lowest prices for each item
-CREATE OR REPLACE VIEW app2.lowest_prices AS
-SELECT DISTINCT ON (i.id)
-    i.id AS item_id,
-    i.name AS item_name,
-    i.category,
-    p.price AS lowest_price,
-    c.name AS chain_name,
-    b.name AS branch_name
-FROM app2.items i
-JOIN app2.prices p ON i.id = p.item_id
-JOIN app2.branches b ON p.branch_id = b.id
-JOIN app2.chains c ON b.chain_id = c.id
-ORDER BY i.id, p.price ASC;
-
--- View to get active (non-expired) tokens
-CREATE OR REPLACE VIEW app2.active_tokens AS
-SELECT *
-FROM app2.tokens
-WHERE expires_at > NOW()
-  AND used = FALSE;
-
-COMMENT ON VIEW app2.lowest_prices IS 'Shows the lowest price for each item across all branches';
-COMMENT ON VIEW app2.active_tokens IS 'Shows all active (non-expired and unused) tokens';
+-- ============================================
+-- COMPLETION MESSAGE
+-- ============================================
+DO $$
+BEGIN
+  RAISE NOTICE '✓ SmartCart database schema deployed successfully';
+  RAISE NOTICE 'Schemas: app (products, lists), app2 (users, auth)';
+  RAISE NOTICE 'Next steps:';
+  RAISE NOTICE '  1. Run parser.js to populate product data';
+  RAISE NOTICE '  2. Start server: cd server && npm start';
+  RAISE NOTICE '  3. Start frontend: cd frontend && npm run dev';
+END $$;

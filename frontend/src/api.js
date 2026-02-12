@@ -1,7 +1,9 @@
 import axios from "axios";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+
 const api = axios.create({
-  baseURL: "http://localhost:8000",
+  baseURL: API_URL,
   withCredentials: true, // זה מבטיח שהעוגייה תישלח בכל בקשה של api.get/post
 });
 
@@ -39,7 +41,7 @@ api.interceptors.response.use(
       originalRequest._retry = true;
       try {
         // שימוש ב-axios רגיל כאן כדי לא להפעיל את ה-interceptor של עצמנו
-        const res = await axios.post("http://localhost:3000/api/refresh", {}, {
+        const res = await axios.post(`${API_URL}/api/refresh`, {
           withCredentials: true,
         });
         const newToken = res.data.accessToken;
