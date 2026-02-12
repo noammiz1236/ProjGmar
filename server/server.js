@@ -19,7 +19,11 @@ const saltRounds = 10;
 
 const io = new Server(server, {
   cors: {
-    origin: process.env.HOST_ALLOWED || "http://localhost:5173",
+    origin: [
+      "http://localhost:5173",
+      "http://100.115.197.11:5173",
+      process.env.host_allowed,
+    ].filter(Boolean),
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -120,17 +124,26 @@ db.query("SELECT NOW()", (err, res) => {
 });
 
 app.get("/api/search", async (req, res) => {
+  console.log(req.query);
   const search = req.query.q;
-  console.log(search);
   if (!search) return res.json([]);
   try {
     const searchTerm = `%${search}%`;
     const reply = await db.query(
-      `SELECT * FROM app.items WHERE name ILIKE $1
-      limit 10`,
+      `SELECT DISTINCT ON (i.id)
+       i.*,
+       p.price,
+       c.name AS chain_name
+FROM app.items i
+LEFT JOIN app.prices p   ON p.item_id = i.id
+LEFT JOIN app.branches b ON b.id = p.branch_id
+LEFT JOIN app.chains c   ON c.id = b.chain_id
+WHERE i.name ILIKE $1
+
+LIMIT 10;
+`,
       [searchTerm],
     );
-    console.log("Searching for:", searchTerm);
     res.json(reply.rows);
   } catch (e) {
     console.error(e);
