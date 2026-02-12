@@ -1,13 +1,15 @@
 import { createContext, useEffect, useState, useRef } from "react";
 import axios from "axios";
 import api, { setAccessToken } from "../api";
+import socket from "../socket";
 
 export const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const hasInitialized = useRef(false); // to check if needed
+  const [isLinkedChild, setIsLinkedChild] = useState(false);
+  const hasInitialized = useRef(false);
 
   useEffect(() => {
     if (hasInitialized.current) return;
@@ -30,7 +32,9 @@ export const AuthProvider = ({ children }) => {
 
         // משיכת פרטי המשתמש
         const userRes = await api.get("/api/me");
-        setUser(userRes.data.user);
+        const userData = userRes.data.user;
+        setUser(userData);
+
         console.log("Session restored successfully");
       } catch (err) {
         // --- התיקון מרכזי כאן ---
@@ -51,6 +55,16 @@ export const AuthProvider = ({ children }) => {
     initAuth();
   }, []);
 
+  // Derive isLinkedChild and register socket room whenever user changes
+  useEffect(() => {
+    if (user) {
+      setIsLinkedChild(!!user.parent_id);
+      socket.emit("register_user", user.id);
+    } else {
+      setIsLinkedChild(false);
+    }
+  }, [user]);
+
   // הצגת ספינר בזמן הבדיקה הראשונית כדי למנוע "קפיצות" במסך
   if (loading) {
     return (
@@ -70,7 +84,7 @@ export const AuthProvider = ({ children }) => {
   }
 
   return (
-    <AuthContext.Provider value={{ user, setUser, loading }}>
+    <AuthContext.Provider value={{ user, setUser, loading, isLinkedChild }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,116 +1,124 @@
 import React, { useState, useContext } from "react";
-import validator from "validator";
-import api, { setAccessToken } from "../api"; // ייבוא ה-api והפונקציה לעדכון הטוקן
+import { Link, useNavigate } from "react-router-dom";
+import api, { setAccessToken } from "../api";
 import { AuthContext } from "../context/AuthContext";
-import { useNavigate } from "react-router-dom"; // הוספתי למקרה שתרצה להעביר דף אחרי לוגין
 
 const Login = () => {
   const { setUser } = useContext(AuthContext);
   const navigate = useNavigate();
 
-  const [email, setEmail] = useState("");
+  const [loginId, setLoginId] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError("");
 
-    // וולידציות מקוריות שלך
-    if (password.length < 8) {
-      alert("Password must be at least 8 characters long!");
+    if (!loginId.trim()) {
+      setError("יש להזין אימייל או שם משתמש");
+      return;
+    }
+    if (!password) {
+      setError("יש להזין סיסמה");
       return;
     }
 
-    if (!validator.isEmail(email)) {
-      alert("Invalid email format");
-      return;
-    }
-
+    setLoading(true);
     try {
-      // שליחת הבקשה לשרת
-      const res = await api.post("/api/login", { email, password });
-
-      // --- השדרוג המודרני ---
-      // 1. שמירת ה-Access Token בזיכרון של קובץ ה-api
+      // Send as email if it contains @, otherwise as username
+      const isEmail = loginId.includes("@");
+      const body = isEmail
+        ? { email: loginId, password }
+        : { username: loginId, password };
+      const res = await api.post("/api/login", body);
       setAccessToken(res.data.accessToken);
-
-      // 2. עדכון ה-User ב-Context (מכיל id, first_name, email וכו')
       setUser(res.data.user);
+      navigate("/");
     } catch (err) {
       const message = err.response?.data?.message;
-      if (message) {
-        alert(`Login failed: ${message}`);
-      } else {
-        alert("Login failed: An unexpected error occurred.");
-      }
-    }
-    finally {
-      navigate("/");
+      setError(message || "ההתחברות נכשלה. נסה שוב.");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="login-page">
-      <div className="container py-5">
-        <div className="row justify-content-center">
-          <div className="col-md-6">
-            <div className="card shadow">
-              <div className="card-body p-5">
-                <h2 className="card-title text-center mb-4">התחברות</h2>
-
-                <form onSubmit={handleSubmit}>
-                  <div className="mb-3">
-                    <label htmlFor="email" className="form-label">
-                      אימייל
-                    </label>
-                    <input
-                      type="email"
-                      className="form-control"
-                      id="email"
-                      placeholder="הכנס אימייל"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <div className="mb-3">
-                    <label htmlFor="password" className="form-label">
-                      סיסמה
-                    </label>
-                    <input
-                      type="password"
-                      className="form-control"
-                      id="password"
-                      placeholder="הכנס סיסמה"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      required
-                    />
-                  </div>
-
-                  <button type="submit" className="btn btn-primary w-100 mb-3">
-                    התחברות
-                  </button>
-                </form>
-
-                <div className="text-center">
-                  <p className="mb-0">
-                    אין לך חשבון?{" "}
-                    <a href="/register" className="text-primary fw-bold">
-                      הירשם כאן
-                    </a>
-                  </p>
-                  <p>
-                    שכחתי סיסמה?{" "}
-                    <a href="/forgot-password" className="text-primary fw-bold">
-                      לחץ כאן
-                    </a>
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
+    <div className="sc-auth-page" dir="rtl">
+      <div className="sc-auth-card page-fade-in">
+        <div className="text-center mb-4">
+          <Link to="/" style={{ textDecoration: "none" }}>
+            <span className="sc-text-gradient" style={{ fontSize: "2rem", fontWeight: 800 }}>
+              <i className="bi bi-cart3"></i> SmartCart
+            </span>
+          </Link>
         </div>
+
+        <h2>ברוכים השבים</h2>
+        <p className="sc-auth-subtitle">התחבר כדי לנהל את הרשימות שלך</p>
+
+        {error && (
+          <div className="alert alert-danger py-2 text-center" style={{ borderRadius: "10px", fontSize: "0.9rem" }}>
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          <div className="mb-3">
+            <label className="form-label fw-semibold" style={{ fontSize: "0.9rem" }}>
+              אימייל או שם משתמש
+            </label>
+            <input
+              type="text"
+              className="form-control sc-input"
+              placeholder="אימייל או שם משתמש"
+              value={loginId}
+              onChange={(e) => setLoginId(e.target.value)}
+              required
+              dir="ltr"
+            />
+          </div>
+
+          <div className="mb-4">
+            <div className="d-flex justify-content-between align-items-center">
+              <label className="form-label fw-semibold mb-0" style={{ fontSize: "0.9rem" }}>
+                סיסמה
+              </label>
+              <Link
+                to="/forgot-password"
+                style={{ fontSize: "0.8rem", color: "var(--sc-primary)" }}
+              >
+                שכחת סיסמה?
+              </Link>
+            </div>
+            <input
+              type="password"
+              className="form-control sc-input mt-1"
+              placeholder="הכנס סיסמה"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </div>
+
+          <button
+            type="submit"
+            className="sc-btn sc-btn-primary w-100"
+            disabled={loading}
+            style={{ padding: "12px", fontSize: "1rem" }}
+          >
+            {loading && <span className="spinner-border spinner-border-sm me-2"></span>}
+            {loading ? "מתחבר..." : "התחברות"}
+          </button>
+        </form>
+
+        <p className="text-center mt-4 mb-0" style={{ fontSize: "0.9rem", color: "var(--sc-text-muted)" }}>
+          אין לך חשבון?{" "}
+          <Link to="/register" style={{ color: "var(--sc-primary)", fontWeight: 600 }}>
+            הרשם כאן
+          </Link>
+        </p>
       </div>
     </div>
   );

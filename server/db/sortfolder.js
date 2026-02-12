@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { ParceStoreFile, parsePriceFile } from "./parser.js";
+import { movetoprocess } from "./organizefiles.js";
 export async function processAllFiles(folderPath) {
   const files = fs.readdirSync(folderPath);
 

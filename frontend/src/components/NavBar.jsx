@@ -1,45 +1,22 @@
 import React, { useContext, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import "./NavBar.css";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 import api from "../api";
-import { useEffect } from "react";
+import NotificationBell from "./NotificationBell";
 
 const NavBar = () => {
-  const { user, setUser, loading } = useContext(AuthContext);
+  const { user, setUser, loading, isLinkedChild } = useContext(AuthContext);
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const [searchQuery, setSearchQuery] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [results, setResults] = useState([]);
-
-  const handleSearchChange = (e) => setSearchQuery(e.target.value);
-  useEffect(() => {
-    const handleSearchSubmit = setTimeout(async () => {
-      if (!searchQuery || searchQuery.trim().length < 2) {
-        setResults([]);
-        return;
-      }
-      try {
-        const { data } = await api.get("/api/search", {
-          params: { q: searchQuery },
-        });
-        setResults(data);
-        console.log("תוצאות שהתקבלו:", data);
-      } catch (err) {
-        console.error("שגיאה בשליפת הנתונים:", err);
-        setResults([]);
-      }
-    }, 500);
-    return () => clearTimeout(handleSearchSubmit);
-  }, [searchQuery]);
 
   const toggleSidebar = () => setSidebarOpen(!sidebarOpen);
   const closeSidebar = () => setSidebarOpen(false);
 
   const handleLogout = async () => {
     try {
-      await api.post("/api/logout"); // לפי הסרבר שלך
+      await api.post("/api/logout");
       setUser(null);
       navigate("/login");
     } catch (err) {
@@ -47,228 +24,151 @@ const NavBar = () => {
     }
   };
 
+  const isActive = (path) => location.pathname === path;
+
+  const allNavLinks = [
+    { to: "/list", label: isLinkedChild ? "רשימות" : "הרשימות שלי" },
+    { to: "/store", label: "חנות" },
+    { to: "/templates", label: "תבניות", parentOnly: true },
+  ];
+  const navLinks = allNavLinks.filter((link) => !link.parentOnly || !isLinkedChild);
+
   return (
     <>
-      <nav className="navbar navbar-expand-lg navbar-light bg-light shadow-sm sticky-top">
-        <div className="container-fluid px-4">
-          <Link className="navbar-brand fw-bold fs-5" to="/">
-            SmartCart
+      <nav className="sc-navbar">
+        <div className="d-flex align-items-center justify-content-between w-100">
+          {/* Brand */}
+          <Link className="sc-navbar-brand" to="/">
+            <i className="bi bi-cart3 me-1"></i> SmartCart
           </Link>
 
+          {/* Mobile toggle */}
           <button
-            className="navbar-toggler d-lg-none"
-            type="button"
+            className="d-lg-none border-0 bg-transparent p-2"
             onClick={toggleSidebar}
-            aria-controls="navbarContent"
-            aria-expanded={sidebarOpen}
             aria-label="Toggle navigation"
+            style={{ fontSize: "1.25rem" }}
           >
-            <span className="navbar-toggler-icon"></span>
+            <i className="bi bi-list"></i>
           </button>
 
-          <div className="navbar-collapse d-none d-lg-flex" id="navbarContent">
-            <ul className="navbar-nav mx-auto align-items-center gap-3">
-              <li className="nav-item">
-                <Link className="btn btn-outline-primary fw-bold" to="/list">
-                  My Lists
-                </Link>
-              </li>
+          {/* Desktop nav */}
+          <div className="d-none d-lg-flex align-items-center gap-2 flex-grow-1 justify-content-center">
+            {navLinks.map((link) => (
+              <Link
+                key={link.to}
+                className={`sc-nav-link ${isActive(link.to) ? "active" : ""}`}
+                to={link.to}
+              >
+                {link.label}
+              </Link>
+            ))}
+          </div>
 
-              <li className="nav-item">
-                <form className="d-flex my-2 my-lg-0 position-relative">
-                  <input
-                    className="form-control form-control-sm me-2"
-                    type="search"
-                    placeholder="Search..."
-                    value={searchQuery}
-                    onChange={handleSearchChange}
-                    style={{ width: "280px" }}
-                  />
-                  {results.length > 0 && (
-                    <ul className="search-results-dropdown">
-                      {results.map((item) => (
-                        <li key={item.id} className="search-result-item">
-                          {item.name}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </form>
-              </li>
-            </ul>
-
-            <ul className="navbar-nav ms-auto align-items-center gap-3">
-              {loading ? null : user ? (
-                <>
-                  <li className="nav-item">
-                    <span className="nav-link text-primary">
-                      {user.first_name}
-                    </span>
-                  </li>
-                  <li className="nav-item">
-                    <Link className="btn btn-outline-secondary" to="/profile">
-                      <i className="bi bi-gear-fill me-1"></i> Settings
-                    </Link>
-                  </li>
-                  <li className="nav-item">
-                    <button
-                      className="btn btn-outline-danger"
-                      onClick={handleLogout}
-                    >
-                      Logout
-                    </button>
-                  </li>
-                </>
-              ) : (
-                <>
-                  <li className="nav-item">
-                    <Link className="nav-link text-primary" to="/login">
-                      Login
-                    </Link>
-                  </li>
-                  <li className="nav-item">
-                    <Link className="btn btn-primary" to="/register">
-                      Register
-                    </Link>
-                  </li>
-                </>
-              )}
-
-              <li className="nav-item">
-                <Link
-                  to="/cart"
-                  className="position-relative nav-link text-dark"
+          {/* Desktop user section */}
+          <div className="d-none d-lg-flex align-items-center gap-2">
+            {loading ? null : user ? (
+              <>
+                <span
+                  className="fw-semibold"
+                  style={{ color: "var(--sc-primary)", fontSize: "0.9rem" }}
                 >
-                  <svg
-                    width="24"
-                    height="24"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <circle cx="9" cy="21" r="1"></circle>
-                    <circle cx="20" cy="21" r="1"></circle>
-                    <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
-                  </svg>
-                  <span className="position-absolute top-0 end-100 translate-middle badge rounded-pill bg-danger">
-                    0
-                  </span>
+                  {user.first_name}
+                </span>
+                {!isLinkedChild && <NotificationBell />}
+                <Link
+                  className="sc-icon-btn"
+                  to="/profile"
+                  title="הגדרות"
+                  style={{ textDecoration: "none" }}
+                >
+                  <i className="bi bi-gear"></i>
                 </Link>
-              </li>
-            </ul>
+                <button
+                  className="sc-btn sc-btn-ghost"
+                  onClick={handleLogout}
+                  style={{ padding: "6px 14px", fontSize: "0.85rem" }}
+                >
+                  התנתק
+                </button>
+              </>
+            ) : (
+              <>
+                <Link
+                  className="sc-nav-link"
+                  to="/login"
+                >
+                  התחברות
+                </Link>
+                <Link
+                  className="sc-btn sc-btn-primary"
+                  to="/register"
+                  style={{ textDecoration: "none", padding: "6px 18px", fontSize: "0.85rem" }}
+                >
+                  הרשמה
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </nav>
 
       {/* Mobile Sidebar */}
       <div
-        className={`mobile-sidebar-overlay ${sidebarOpen ? "open" : ""}`}
+        className={`sc-sidebar-overlay ${sidebarOpen ? "open" : ""}`}
         onClick={closeSidebar}
       />
-      <div className={`mobile-sidebar ${sidebarOpen ? "open" : ""}`}>
-        <ul>
-          <li className="search-bar-item">
-            <form className="search-bar-form">
-              <input
-                className="form-control form-control-sm"
-                type="search"
-                placeholder="Search..."
-                value={searchQuery}
-                onChange={handleSearchChange}
-              />
-              <button className="btn btn-primary btn-sm" type="submit">
-                Go
-              </button>
-            </form>
-          </li>
+      <div className={`sc-sidebar ${sidebarOpen ? "open" : ""}`} dir="rtl">
+        <ul className="sc-sidebar-nav">
+          {navLinks.map((link) => (
+            <li key={link.to}>
+              <Link to={link.to} onClick={closeSidebar}>
+                {link.label}
+              </Link>
+            </li>
+          ))}
 
-          <li>
-            <Link
-              className="btn btn-outline-primary fw-bold"
-              to="/store"
-              onClick={closeSidebar}
-            >
-              Store
-            </Link>
-          </li>
+          <li><div className="sc-divider"></div></li>
 
           {loading ? null : user ? (
             <>
-              <li>
-                <span className="text-primary">{user.first_name}</span>
+              <li style={{ padding: "8px 16px" }} className="d-flex align-items-center justify-content-between">
+                <span style={{ color: "var(--sc-primary)", fontWeight: 600 }}>
+                  {user.first_name}
+                </span>
+                {!isLinkedChild && <NotificationBell />}
               </li>
               <li>
-                <Link
-                  className="btn btn-outline-secondary w-100 my-2"
-                  to="/profile"
-                  onClick={closeSidebar}
-                >
-                  <i className="bi bi-gear-fill me-1"></i> Settings
+                <Link to="/profile" onClick={closeSidebar}>
+                  <i className="bi bi-gear me-2"></i>הגדרות
                 </Link>
               </li>
               <li>
                 <button
-                  className="btn btn-outline-danger"
                   onClick={() => {
                     closeSidebar();
                     handleLogout();
                   }}
+                  style={{ color: "var(--sc-danger)" }}
                 >
-                  Logout
+                  <i className="bi bi-box-arrow-right me-2"></i>התנתק
                 </button>
               </li>
             </>
           ) : (
             <>
               <li>
-                <Link
-                  className="text-primary"
-                  to="/login"
-                  onClick={closeSidebar}
-                >
-                  Login
+                <Link to="/login" onClick={closeSidebar}>
+                  התחברות
                 </Link>
               </li>
               <li>
-                <Link
-                  className="btn btn-primary"
-                  to="/register"
-                  onClick={closeSidebar}
-                >
-                  Register
+                <Link to="/register" onClick={closeSidebar} className="sc-sidebar-cta">
+                  הרשמה
                 </Link>
               </li>
             </>
           )}
-
-          <li>
-            <Link
-              to="/cart"
-              className="position-relative"
-              onClick={closeSidebar}
-            >
-              <svg
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="9" cy="21" r="1"></circle>
-                <circle cx="20" cy="21" r="1"></circle>
-                <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path>
-              </svg>
-              <span className="position-absolute top-0 end-100 translate-middle badge rounded-pill bg-danger">
-                0
-              </span>
-            </Link>
-          </li>
         </ul>
       </div>
     </>

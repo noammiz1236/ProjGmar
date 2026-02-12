@@ -2,17 +2,19 @@ import { useContext } from "react";
 import { Navigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 
-export default function PrivateRoute({ children }) {
-  const { user, loading } = useContext(AuthContext);
+export default function PrivateRoute({ children, parentOnly }) {
+  const { user, loading, isLinkedChild } = useContext(AuthContext);
 
-  // אם עדיין טוען - לא לעשות Redirect
   if (loading) return null;
 
-  // אם אין משתמש - להעביר ל-login
   if (!user) {
     return <Navigate to="/login" />;
   }
 
-  // אם יש משתמש - להמשיך
+  // Block child accounts from parent-only pages
+  if (parentOnly && isLinkedChild) {
+    return <Navigate to="/list" />;
+  }
+
   return children;
 }

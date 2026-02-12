@@ -1,8 +1,7 @@
 import React, { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import validator from "validator";
-import { useNavigate } from "react-router-dom";
 
 const Register = () => {
   const [formData, setFormData] = useState({
@@ -12,173 +11,105 @@ const Register = () => {
     password: "",
     confirmPassword: "",
   });
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData({
-      ...formData,
-      [name]: value,
-    });
+    setFormData({ ...formData, [name]: value });
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError("");
+    const { password, confirmPassword, email, first_name, last_name } = formData;
 
-    const { password, confirmPassword, email, first_name, last_name } =
-      formData;
-    // Validate passwords
     if (password !== confirmPassword) {
-      alert("Passwords do not match!");
+      setError("הסיסמאות אינן תואמות");
       return;
     }
-    if (first_name.length < 2 && last_name.length < 2) {
-      alert("Name must be at least 2 characters long!");
+    if (first_name.length < 2 || last_name.length < 2) {
+      setError("שם חייב להכיל לפחות 2 תווים");
       return;
     }
     if (password.length < 8) {
-      alert("Password must be at least 8 characters long!");
+      setError("הסיסמה חייבת להכיל לפחות 8 תווים");
       return;
     }
-
-    // Validate email format
     if (!validator.isEmail(email)) {
-      alert("Invalid email format");
+      setError("כתובת אימייל לא תקינה");
       return;
     }
 
-    // Send request
+    setLoading(true);
     try {
-      await axios.post("http://localhost:5000/api/register", formData);
-      console.log("Registration success");
-    } catch (error) {
-      const message = error.response?.data?.message;
-
-      if (message) {
-        alert(`Registration failed: ${message}`); // to change from alert to msg in clinet page
-      } else {
-        alert("Registration failed: An unexpected error occurred."); // to change from alert to msg in clinet page
-      }
-    }
-    finally {
-      navigate("/");
+      await axios.post("http://localhost:3000/api/register", formData);
+      navigate("/login");
+    } catch (err) {
+      setError(err.response?.data?.message || "ההרשמה נכשלה. נסה שוב.");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <div className="register-page">
-      <div className="container py-5">
-        <div className="row justify-content-center">
-          <div className="col-md-6">
-            <div className="card shadow">
-              <div className="card-body p-5">
-                <h2 className="card-title text-center mb-4">הרשמה</h2>
+    <div className="sc-auth-page" dir="rtl">
+      <div className="sc-auth-card page-fade-in">
+        <div className="text-center mb-4">
+          <Link to="/" style={{ textDecoration: "none" }}>
+            <span className="sc-text-gradient" style={{ fontSize: "2rem", fontWeight: 800 }}>
+              <i className="bi bi-cart3"></i> SmartCart
+            </span>
+          </Link>
+        </div>
 
-                <form onSubmit={handleSubmit}>
-                  {/* First Name */}
-                  <div className="mb-3">
-                    <label htmlFor="firstName" className="form-label">
-                      שם פרטי
-                    </label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      id="firstName"
-                      name="first_name"
-                      placeholder="הכנס שם פרטי"
-                      value={formData.first_name}
-                      onChange={handleChange}
-                      required
-                    />
-                  </div>
+        <h2>צור חשבון חדש</h2>
+        <p className="sc-auth-subtitle">הצטרף ל-SmartCart ונהל קניות בחכמה</p>
 
-                  {/* Last Name */}
-                  <div className="mb-3">
-                    <label htmlFor="lastName" className="form-label">
-                      שם משפחה
-                    </label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      id="lastName"
-                      name="last_name"
-                      placeholder="הכנס שם משפחה"
-                      value={formData.last_name}
-                      onChange={handleChange}
-                      required
-                    />
-                  </div>
+        {error && (
+          <div className="alert alert-danger py-2 text-center" style={{ borderRadius: "10px", fontSize: "0.9rem" }}>
+            {error}
+          </div>
+        )}
 
-                  {/* Email */}
-                  <div className="mb-3">
-                    <label htmlFor="email" className="form-label">
-                      אימייל
-                    </label>
-                    <input
-                      type="email"
-                      className="form-control"
-                      id="email"
-                      name="email"
-                      placeholder="הכנס אימייל"
-                      value={formData.email}
-                      onChange={handleChange}
-                      required
-                    />
-                  </div>
-
-                  {/* Password */}
-                  <div className="mb-3">
-                    <label htmlFor="password" className="form-label">
-                      סיסמה
-                    </label>
-                    <input
-                      type="password"
-                      className="form-control"
-                      id="password"
-                      name="password"
-                      placeholder="הכנס סיסמה"
-                      value={formData.password}
-                      onChange={handleChange}
-                      required
-                    />
-                  </div>
-
-                  {/* Confirm Password */}
-                  <div className="mb-3">
-                    <label htmlFor="confirmPassword" className="form-label">
-                      אימות סיסמה
-                    </label>
-                    <input
-                      type="password"
-                      className="form-control"
-                      id="confirmPassword"
-                      name="confirmPassword"
-                      placeholder="אימות סיסמה"
-                      value={formData.confirmPassword}
-                      onChange={handleChange}
-                      required
-                    />
-                  </div>
-
-                  {/* Submit Button */}
-                  <button type="submit" className="btn btn-primary w-100 mb-3">
-                    הרשמה
-                  </button>
-                </form>
-
-                {/* Login Link */}
-                <div className="text-center">
-                  <p className="mb-0">
-                    כבר יש לך חשבון?{" "}
-                    <Link to="/login" className="text-primary fw-bold">
-                      התחבר כאן
-                    </Link>
-                  </p>
-                </div>
-              </div>
+        <form onSubmit={handleSubmit}>
+          <div className="row g-3 mb-3">
+            <div className="col-6">
+              <label className="form-label fw-semibold" style={{ fontSize: "0.9rem" }}>שם פרטי</label>
+              <input type="text" className="form-control sc-input" name="first_name" placeholder="ישראל" value={formData.first_name} onChange={handleChange} required />
+            </div>
+            <div className="col-6">
+              <label className="form-label fw-semibold" style={{ fontSize: "0.9rem" }}>שם משפחה</label>
+              <input type="text" className="form-control sc-input" name="last_name" placeholder="ישראלי" value={formData.last_name} onChange={handleChange} required />
             </div>
           </div>
-        </div>
+
+          <div className="mb-3">
+            <label className="form-label fw-semibold" style={{ fontSize: "0.9rem" }}>אימייל</label>
+            <input type="email" className="form-control sc-input" name="email" placeholder="name@example.com" value={formData.email} onChange={handleChange} required dir="ltr" />
+          </div>
+
+          <div className="mb-3">
+            <label className="form-label fw-semibold" style={{ fontSize: "0.9rem" }}>סיסמה</label>
+            <input type="password" className="form-control sc-input" name="password" placeholder="לפחות 8 תווים" value={formData.password} onChange={handleChange} required />
+          </div>
+
+          <div className="mb-4">
+            <label className="form-label fw-semibold" style={{ fontSize: "0.9rem" }}>אימות סיסמה</label>
+            <input type="password" className="form-control sc-input" name="confirmPassword" placeholder="הקלד שוב את הסיסמה" value={formData.confirmPassword} onChange={handleChange} required />
+          </div>
+
+          <button type="submit" className="sc-btn sc-btn-primary w-100" disabled={loading} style={{ padding: "12px", fontSize: "1rem" }}>
+            {loading && <span className="spinner-border spinner-border-sm me-2"></span>}
+            {loading ? "נרשם..." : "הרשמה"}
+          </button>
+        </form>
+
+        <p className="text-center mt-4 mb-0" style={{ fontSize: "0.9rem", color: "var(--sc-text-muted)" }}>
+          כבר יש לך חשבון?{" "}
+          <Link to="/login" style={{ color: "var(--sc-primary)", fontWeight: 600 }}>התחבר כאן</Link>
+        </p>
       </div>
     </div>
   );
