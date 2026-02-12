@@ -65,15 +65,17 @@ const ListDetail = () => {
     };
     const onItemStatusChanged = ({ itemId, isChecked }) => {
       setItems((prev) =>
-        prev.map((i) => (i.id === itemId ? { ...i, is_checked: isChecked } : i)),
+        prev.map((i) =>
+          i.id === itemId ? { ...i, is_checked: isChecked } : i,
+        ),
       );
     };
     const onItemDeleted = ({ itemId }) => {
       setItems((prev) => prev.filter((i) => i.id !== itemId));
     };
-    const onNoteUpdated = ({ itemId, note }) => {
+    const onNoteUpdated = ({ itemId, note, note_by, note_by_name }) => {
       setItems((prev) =>
-        prev.map((i) => (i.id === itemId ? { ...i, note } : i)),
+        prev.map((i) => (i.id === itemId ? { ...i, note, note_by, note_by_name } : i)),
       );
     };
     const onItemPaid = ({ itemId, paid_by, paid_by_name, paid_at }) => {
@@ -86,7 +88,9 @@ const ListDetail = () => {
     const onItemUnpaid = ({ itemId }) => {
       setItems((prev) =>
         prev.map((i) =>
-          i.id === itemId ? { ...i, paid_by: null, paid_by_name: null, paid_at: null } : i,
+          i.id === itemId
+            ? { ...i, paid_by: null, paid_by_name: null, paid_at: null }
+            : i,
         ),
       );
     };
@@ -121,8 +125,10 @@ const ListDetail = () => {
     searchTimerRef.current = setTimeout(async () => {
       setSearchLoading(true);
       try {
-        const { data } = await api.get(`/api/store?q=${encodeURIComponent(value.trim())}&limit=8`);
-        setSearchResults(Array.isArray(data.products) ? data.products : []);
+        const { data } = await api.get(
+          `/api/search?q=${encodeURIComponent(value.trim())}`,
+        );
+        setSearchResults(Array.isArray(data) ? data.slice(0, 8) : []);
       } catch (err) {
         console.error(err);
       } finally {
@@ -134,7 +140,10 @@ const ListDetail = () => {
   // Close search dropdown on click outside
   useEffect(() => {
     const handleClickOutside = (e) => {
-      if (searchWrapperRef.current && !searchWrapperRef.current.contains(e.target)) {
+      if (
+        searchWrapperRef.current &&
+        !searchWrapperRef.current.contains(e.target)
+      ) {
         setSearchResults([]);
       }
     };
@@ -235,7 +244,9 @@ const ListDetail = () => {
         await api.post(`/api/lists/${listId}/children/${childId}`);
       }
       setChildrenList((prev) =>
-        prev.map((c) => c.id === childId ? { ...c, is_member: !currentlyMember } : c),
+        prev.map((c) =>
+          c.id === childId ? { ...c, is_member: !currentlyMember } : c,
+        ),
       );
     } catch (err) {
       console.error(err);
@@ -252,7 +263,9 @@ const ListDetail = () => {
 
   const checkedCount = items.filter((i) => i.is_checked || i.paid_by).length;
   const basketTotal = items.reduce((sum, item) => {
-    return sum + (parseFloat(item.price) || 0) * (parseFloat(item.quantity) || 1);
+    return (
+      sum + (parseFloat(item.price) || 0) * (parseFloat(item.quantity) || 1)
+    );
   }, 0);
 
   return (
@@ -269,23 +282,41 @@ const ListDetail = () => {
               <i className="bi bi-arrow-right me-1"></i> חזרה
             </button>
             <h3 className="fw-bold mb-1">{list?.list_name}</h3>
-            <div className="d-flex align-items-center gap-3" style={{ color: "var(--sc-text-muted)", fontSize: "0.85rem" }}>
-              <span><i className="bi bi-people me-1"></i>{members.map((m) => m.first_name).join(", ")}</span>
+            <div
+              className="d-flex align-items-center gap-3"
+              style={{ color: "var(--sc-text-muted)", fontSize: "0.85rem" }}
+            >
+              <span>
+                <i className="bi bi-people me-1"></i>
+                {members.map((m) => m.first_name).join(", ")}
+              </span>
             </div>
           </div>
           {!isLinkedChild && (
             <div className="d-flex gap-2">
               {userRole === "admin" && (
                 <>
-                  <button className="sc-btn sc-btn-ghost" onClick={() => setShowInvite(true)} style={{ fontSize: "0.8rem", padding: "6px 12px" }}>
+                  <button
+                    className="sc-btn sc-btn-ghost"
+                    onClick={() => setShowInvite(true)}
+                    style={{ fontSize: "0.8rem", padding: "6px 12px" }}
+                  >
                     <i className="bi bi-person-plus me-1"></i> הזמן
                   </button>
-                  <button className="sc-btn sc-btn-ghost" onClick={handleOpenChildren} style={{ fontSize: "0.8rem", padding: "6px 12px" }}>
+                  <button
+                    className="sc-btn sc-btn-ghost"
+                    onClick={handleOpenChildren}
+                    style={{ fontSize: "0.8rem", padding: "6px 12px" }}
+                  >
                     <i className="bi bi-people me-1"></i> ילדים
                   </button>
                 </>
               )}
-              <button className="sc-btn sc-btn-ghost" onClick={() => setShowSaveTemplate(true)} style={{ fontSize: "0.8rem", padding: "6px 12px" }}>
+              <button
+                className="sc-btn sc-btn-ghost"
+                onClick={() => setShowSaveTemplate(true)}
+                style={{ fontSize: "0.8rem", padding: "6px 12px" }}
+              >
                 <i className="bi bi-bookmark me-1"></i> תבנית
               </button>
             </div>
@@ -295,11 +326,23 @@ const ListDetail = () => {
         {/* Progress bar */}
         {items.length > 0 && (
           <div className="mb-3">
-            <div className="d-flex justify-content-between mb-1" style={{ fontSize: "0.8rem", color: "var(--sc-text-muted)" }}>
-              <span>{checkedCount} מתוך {items.length} הושלמו</span>
+            <div
+              className="d-flex justify-content-between mb-1"
+              style={{ fontSize: "0.8rem", color: "var(--sc-text-muted)" }}
+            >
+              <span>
+                {checkedCount} מתוך {items.length} הושלמו
+              </span>
               <span>{Math.round((checkedCount / items.length) * 100)}%</span>
             </div>
-            <div style={{ height: "6px", background: "var(--sc-border)", borderRadius: "3px", overflow: "hidden" }}>
+            <div
+              style={{
+                height: "6px",
+                background: "var(--sc-border)",
+                borderRadius: "3px",
+                overflow: "hidden",
+              }}
+            >
               <div
                 style={{
                   height: "100%",
@@ -317,8 +360,15 @@ const ListDetail = () => {
         {items.length > 0 && (
           <div className="sc-card p-3 mb-3 d-flex justify-content-between align-items-center">
             <div>
-              <span style={{ fontSize: "0.85rem", color: "var(--sc-text-muted)" }}>סה"כ סל: </span>
-              <span className="fw-bold" style={{ fontSize: "1.1rem", color: "var(--sc-primary)" }}>
+              <span
+                style={{ fontSize: "0.85rem", color: "var(--sc-text-muted)" }}
+              >
+                סה"כ סל:{" "}
+              </span>
+              <span
+                className="fw-bold"
+                style={{ fontSize: "1.1rem", color: "var(--sc-primary)" }}
+              >
                 ₪{basketTotal.toFixed(2)}
               </span>
             </div>
@@ -338,31 +388,74 @@ const ListDetail = () => {
             /* Selected product - show details + add button */
             <form onSubmit={handleAddItem}>
               <div className="d-flex align-items-center gap-3">
-                <div style={{
-                  width: "38px", height: "38px", borderRadius: "10px", flexShrink: 0,
-                  background: "linear-gradient(135deg, rgba(79,70,229,0.1), rgba(6,182,212,0.08))",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
-                  <i className="bi bi-box-seam" style={{ color: "var(--sc-primary)", fontSize: "0.9rem" }}></i>
+                <div
+                  style={{
+                    width: "38px",
+                    height: "38px",
+                    borderRadius: "10px",
+                    flexShrink: 0,
+                    background:
+                      "linear-gradient(135deg, rgba(79,70,229,0.1), rgba(6,182,212,0.08))",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <i
+                    className="bi bi-box-seam"
+                    style={{ color: "var(--sc-primary)", fontSize: "0.9rem" }}
+                  ></i>
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="fw-bold" style={{ fontSize: "0.9rem" }}>{selectedProduct.item_name}</div>
+                  <div className="fw-bold" style={{ fontSize: "0.9rem" }}>
+                    {selectedProduct.item_name}
+                  </div>
                   <small style={{ color: "var(--sc-text-muted)" }}>
                     {selectedProduct.price ? `₪${selectedProduct.price}` : ""}
-                    {selectedProduct.chain_name ? ` · ${selectedProduct.chain_name}` : ""}
+                    {selectedProduct.chain_name
+                      ? ` · ${selectedProduct.chain_name}`
+                      : ""}
                   </small>
                 </div>
-                <div className="d-flex align-items-center gap-2" style={{
-                  background: "var(--sc-bg)", borderRadius: "10px", padding: "4px 8px",
-                }}>
-                  <button type="button" className="sc-icon-btn" onClick={() => setItemQty(Math.max(1, itemQty - 1))}
-                    style={{ width: "26px", height: "26px" }}>
-                    <i className="bi bi-dash" style={{ fontSize: "0.8rem" }}></i>
+                <div
+                  className="d-flex align-items-center gap-2"
+                  style={{
+                    background: "var(--sc-bg)",
+                    borderRadius: "10px",
+                    padding: "4px 8px",
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="sc-icon-btn"
+                    onClick={() => setItemQty(Math.max(1, itemQty - 1))}
+                    style={{ width: "26px", height: "26px" }}
+                  >
+                    <i
+                      className="bi bi-dash"
+                      style={{ fontSize: "0.8rem" }}
+                    ></i>
                   </button>
-                  <span className="fw-bold" style={{ fontSize: "0.9rem", minWidth: "18px", textAlign: "center" }}>{itemQty}</span>
-                  <button type="button" className="sc-icon-btn" onClick={() => setItemQty(itemQty + 1)}
-                    style={{ width: "26px", height: "26px" }}>
-                    <i className="bi bi-plus" style={{ fontSize: "0.8rem" }}></i>
+                  <span
+                    className="fw-bold"
+                    style={{
+                      fontSize: "0.9rem",
+                      minWidth: "18px",
+                      textAlign: "center",
+                    }}
+                  >
+                    {itemQty}
+                  </span>
+                  <button
+                    type="button"
+                    className="sc-icon-btn"
+                    onClick={() => setItemQty(itemQty + 1)}
+                    style={{ width: "26px", height: "26px" }}
+                  >
+                    <i
+                      className="bi bi-plus"
+                      style={{ fontSize: "0.8rem" }}
+                    ></i>
                   </button>
                 </div>
                 <button
@@ -371,12 +464,19 @@ const ListDetail = () => {
                   style={{ padding: "8px 16px", whiteSpace: "nowrap" }}
                 >
                   {isLinkedChild ? (
-                    <><i className="bi bi-send me-1"></i> בקש</>
+                    <>
+                      <i className="bi bi-send me-1"></i> בקש
+                    </>
                   ) : (
                     <i className="bi bi-plus-lg"></i>
                   )}
                 </button>
-                <button type="button" className="sc-icon-btn" onClick={clearSelectedProduct} title="בטל">
+                <button
+                  type="button"
+                  className="sc-icon-btn"
+                  onClick={clearSelectedProduct}
+                  title="בטל"
+                >
                   <i className="bi bi-x-lg"></i>
                 </button>
               </div>
@@ -386,21 +486,36 @@ const ListDetail = () => {
             <div ref={searchWrapperRef} style={{ position: "relative" }}>
               <div className="d-flex gap-2 align-items-center">
                 <div className="position-relative flex-grow-1">
-                  <i className="bi bi-search" style={{
-                    position: "absolute", right: "12px", top: "50%", transform: "translateY(-50%)",
-                    color: "var(--sc-text-muted)", fontSize: "0.85rem", pointerEvents: "none",
-                  }}></i>
+                  <i
+                    className="bi bi-search"
+                    style={{
+                      position: "absolute",
+                      right: "12px",
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      color: "var(--sc-text-muted)",
+                      fontSize: "0.85rem",
+                      pointerEvents: "none",
+                    }}
+                  ></i>
                   <input
                     type="text"
                     className="form-control sc-input"
                     placeholder="חפש מוצר להוספה..."
                     value={searchQuery}
                     onChange={(e) => handleSearchChange(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.preventDefault();
+                    }}
                     style={{ fontSize: "0.9rem", paddingRight: "36px" }}
                   />
                 </div>
-                <button type="button" className="sc-icon-btn" onClick={() => setShowScanner(true)} title="סרוק ברקוד">
+                <button
+                  type="button"
+                  className="sc-icon-btn"
+                  onClick={() => setShowScanner(true)}
+                  title="סרוק ברקוד"
+                >
                   <i className="bi bi-upc-scan"></i>
                 </button>
               </div>
@@ -408,52 +523,102 @@ const ListDetail = () => {
               {/* Search loading */}
               {searchLoading && (
                 <div className="text-center py-2">
-                  <small style={{ color: "var(--sc-text-muted)" }}>מחפש...</small>
+                  <small style={{ color: "var(--sc-text-muted)" }}>
+                    מחפש...
+                  </small>
                 </div>
               )}
 
               {/* Search results dropdown */}
               {searchResults.length > 0 && (
-                <div style={{
-                  position: "absolute", left: 0, right: 0, zIndex: 1050,
-                  marginTop: "6px",
-                  border: "1px solid var(--sc-border)",
-                  borderRadius: "var(--sc-radius)",
-                  background: "var(--sc-surface)",
-                  boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
-                  maxHeight: "260px",
-                  overflowY: "auto",
-                }}>
+                <div
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    zIndex: 1050,
+                    marginTop: "6px",
+                    border: "1px solid var(--sc-border)",
+                    borderRadius: "var(--sc-radius)",
+                    background: "var(--sc-surface)",
+                    boxShadow: "0 8px 32px rgba(0,0,0,0.12)",
+                    maxHeight: "260px",
+                    overflowY: "auto",
+                  }}
+                >
                   {searchResults.map((item, i) => (
                     <div
                       key={`${item.item_id}-${item.chain_id}-${i}`}
                       onClick={() => handleSelectProduct(item)}
                       style={{
-                        display: "flex", alignItems: "center", gap: "10px",
-                        padding: "10px 14px", cursor: "pointer",
-                        borderBottom: i < searchResults.length - 1 ? "1px solid var(--sc-border)" : "none",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                        padding: "10px 14px",
+                        cursor: "pointer",
+                        borderBottom:
+                          i < searchResults.length - 1
+                            ? "1px solid var(--sc-border)"
+                            : "none",
                         transition: "background 0.15s ease",
                       }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = "rgba(79,70,229,0.04)"}
-                      onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                      onMouseEnter={(e) =>
+                        (e.currentTarget.style.background =
+                          "rgba(79,70,229,0.04)")
+                      }
+                      onMouseLeave={(e) =>
+                        (e.currentTarget.style.background = "transparent")
+                      }
                     >
-                      <div style={{
-                        width: "34px", height: "34px", borderRadius: "8px", flexShrink: 0,
-                        background: "linear-gradient(135deg, rgba(79,70,229,0.08), rgba(6,182,212,0.06))",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                      }}>
-                        <i className="bi bi-box-seam" style={{ fontSize: "0.85rem", color: "var(--sc-primary)" }}></i>
+                      <div
+                        style={{
+                          width: "34px",
+                          height: "34px",
+                          borderRadius: "8px",
+                          flexShrink: 0,
+                          background:
+                            "linear-gradient(135deg, rgba(79,70,229,0.08), rgba(6,182,212,0.06))",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <i
+                          className="bi bi-box-seam"
+                          style={{
+                            fontSize: "0.85rem",
+                            color: "var(--sc-primary)",
+                          }}
+                        ></i>
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div className="fw-bold" style={{ fontSize: "0.85rem", lineHeight: 1.3 }}>{item.item_name}</div>
+                        <div
+                          className="fw-bold"
+                          style={{ fontSize: "0.85rem", lineHeight: 1.3 }}
+                        >
+                          {item.item_name}
+                        </div>
                         {item.chain_name && (
-                          <small style={{ color: "var(--sc-text-muted)", fontSize: "0.75rem" }}>
-                            <i className="bi bi-shop me-1"></i>{item.chain_name}
+                          <small
+                            style={{
+                              color: "var(--sc-text-muted)",
+                              fontSize: "0.75rem",
+                            }}
+                          >
+                            <i className="bi bi-shop me-1"></i>
+                            {item.chain_name}
                           </small>
                         )}
                       </div>
                       {item.price && (
-                        <span style={{ fontWeight: 700, color: "var(--sc-primary)", fontSize: "0.9rem", flexShrink: 0 }}>
+                        <span
+                          style={{
+                            fontWeight: 700,
+                            color: "var(--sc-primary)",
+                            fontSize: "0.9rem",
+                            flexShrink: 0,
+                          }}
+                        >
                           ₪{item.price}
                         </span>
                       )}
@@ -464,8 +629,16 @@ const ListDetail = () => {
             </div>
           )}
           {requestMsg && (
-            <div className="mt-2" style={{ fontSize: "0.85rem", color: "var(--sc-primary)", fontWeight: 500 }}>
-              <i className="bi bi-info-circle me-1"></i>{requestMsg}
+            <div
+              className="mt-2"
+              style={{
+                fontSize: "0.85rem",
+                color: "var(--sc-primary)",
+                fontWeight: 500,
+              }}
+            >
+              <i className="bi bi-info-circle me-1"></i>
+              {requestMsg}
             </div>
           )}
         </div>
@@ -474,7 +647,9 @@ const ListDetail = () => {
         {items.length === 0 ? (
           <div className="sc-card">
             <div className="sc-empty" style={{ padding: "2rem" }}>
-              <div className="sc-empty-icon"><i className="bi bi-basket"></i></div>
+              <div className="sc-empty-icon">
+                <i className="bi bi-basket"></i>
+              </div>
               <h4>הרשימה ריקה</h4>
               <p>הוסף פריטים למעלה כדי להתחיל</p>
             </div>
@@ -488,55 +663,114 @@ const ListDetail = () => {
         )}
 
         {/* Modals */}
-        <InviteLinkModal show={showInvite} onClose={() => setShowInvite(false)} listId={listId} />
-        <SaveAsTemplateModal show={showSaveTemplate} onClose={() => setShowSaveTemplate(false)} listId={listId} />
+        <InviteLinkModal
+          show={showInvite}
+          onClose={() => setShowInvite(false)}
+          listId={listId}
+        />
+        <SaveAsTemplateModal
+          show={showSaveTemplate}
+          onClose={() => setShowSaveTemplate(false)}
+          listId={listId}
+        />
         {showScanner && (
-          <BarcodeScanner onResult={handleBarcodeResult} onClose={() => setShowScanner(false)} />
+          <BarcodeScanner
+            onResult={handleBarcodeResult}
+            onClose={() => setShowScanner(false)}
+          />
         )}
 
         {/* Price Comparison Modal */}
         {showCompare && (
-          <div className="sc-modal-overlay" onClick={() => setShowCompare(false)} dir="rtl">
-            <div className="sc-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "560px" }}>
+          <div
+            className="sc-modal-overlay"
+            onClick={() => setShowCompare(false)}
+            dir="rtl"
+          >
+            <div
+              className="sc-modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: "560px" }}
+            >
               <div className="sc-modal-header">
-                <h5><i className="bi bi-bar-chart me-2"></i>השוואת מחירים</h5>
-                <button className="sc-icon-btn" onClick={() => setShowCompare(false)}>
+                <h5>
+                  <i className="bi bi-bar-chart me-2"></i>השוואת מחירים
+                </h5>
+                <button
+                  className="sc-icon-btn"
+                  onClick={() => setShowCompare(false)}
+                >
                   <i className="bi bi-x-lg"></i>
                 </button>
               </div>
 
-              <div className="sc-modal-body" style={{ maxHeight: "70vh", overflowY: "auto" }}>
+              <div
+                className="sc-modal-body"
+                style={{ maxHeight: "70vh", overflowY: "auto" }}
+              >
                 {compareLoading ? (
                   <div className="text-center py-5">
-                    <div className="sc-spinner" style={{ margin: "0 auto" }}></div>
-                    <p className="mt-3" style={{ color: "var(--sc-text-muted)" }}>מחשב מחירים...</p>
+                    <div
+                      className="sc-spinner"
+                      style={{ margin: "0 auto" }}
+                    ></div>
+                    <p
+                      className="mt-3"
+                      style={{ color: "var(--sc-text-muted)" }}
+                    >
+                      מחשב מחירים...
+                    </p>
                   </div>
                 ) : !compareData ? (
-                  <div className="text-center py-4" style={{ color: "var(--sc-text-muted)" }}>
+                  <div
+                    className="text-center py-4"
+                    style={{ color: "var(--sc-text-muted)" }}
+                  >
                     שגיאה בטעינת ההשוואה
                   </div>
                 ) : (
                   <>
                     {/* Unlinked items warning */}
                     {compareData.unlinkedCount > 0 && (
-                      <div style={{
-                        padding: "10px 14px", borderRadius: "var(--sc-radius)", marginBottom: "12px",
-                        background: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.2)",
-                        fontSize: "0.82rem", color: "#b45309",
-                      }}>
+                      <div
+                        style={{
+                          padding: "10px 14px",
+                          borderRadius: "var(--sc-radius)",
+                          marginBottom: "12px",
+                          background: "rgba(245, 158, 11, 0.08)",
+                          border: "1px solid rgba(245, 158, 11, 0.2)",
+                          fontSize: "0.82rem",
+                          color: "#b45309",
+                        }}
+                      >
                         <i className="bi bi-info-circle me-1"></i>
-                        {compareData.unlinkedCount} פריטים הוזנו ידנית ולא נכללים בהשוואה
+                        {compareData.unlinkedCount} פריטים הוזנו ידנית ולא
+                        נכללים בהשוואה
                       </div>
                     )}
 
                     {compareData.linkedCount === 0 ? (
-                      <div className="text-center py-4" style={{ color: "var(--sc-text-muted)" }}>
-                        <i className="bi bi-link-45deg" style={{ fontSize: "2rem", opacity: 0.4 }}></i>
-                        <p className="mt-2 mb-0">אין פריטים מקושרים למוצרים בחנות. הוסף פריטים מדף החנות כדי להשוות מחירים.</p>
+                      <div
+                        className="text-center py-4"
+                        style={{ color: "var(--sc-text-muted)" }}
+                      >
+                        <i
+                          className="bi bi-link-45deg"
+                          style={{ fontSize: "2rem", opacity: 0.4 }}
+                        ></i>
+                        <p className="mt-2 mb-0">
+                          אין פריטים מקושרים למוצרים בחנות. הוסף פריטים מדף
+                          החנות כדי להשוות מחירים.
+                        </p>
                       </div>
                     ) : compareData.chains.length === 0 ? (
-                      <div className="text-center py-4" style={{ color: "var(--sc-text-muted)" }}>
-                        <p className="mb-0">לא נמצאו מחירים עבור הפריטים ברשימה</p>
+                      <div
+                        className="text-center py-4"
+                        style={{ color: "var(--sc-text-muted)" }}
+                      >
+                        <p className="mb-0">
+                          לא נמצאו מחירים עבור הפריטים ברשימה
+                        </p>
                       </div>
                     ) : (
                       <div className="d-flex flex-column gap-3">
@@ -544,51 +778,99 @@ const ListDetail = () => {
                           <div
                             key={chain.chainId}
                             style={{
-                              border: idx === 0 ? "2px solid var(--sc-success)" : "1px solid var(--sc-border)",
+                              border:
+                                idx === 0
+                                  ? "2px solid var(--sc-success)"
+                                  : "1px solid var(--sc-border)",
                               borderRadius: "var(--sc-radius)",
                               overflow: "hidden",
                             }}
                           >
                             {/* Chain header */}
-                            <div style={{
-                              padding: "12px 16px",
-                              background: idx === 0 ? "rgba(16, 185, 129, 0.06)" : "var(--sc-bg)",
-                              display: "flex", justifyContent: "space-between", alignItems: "center",
-                            }}>
+                            <div
+                              style={{
+                                padding: "12px 16px",
+                                background:
+                                  idx === 0
+                                    ? "rgba(16, 185, 129, 0.06)"
+                                    : "var(--sc-bg)",
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                              }}
+                            >
                               <div className="d-flex align-items-center gap-2">
-                                <i className="bi bi-shop" style={{ color: idx === 0 ? "var(--sc-success)" : "var(--sc-text-muted)" }}></i>
-                                <span className="fw-bold" style={{ fontSize: "0.95rem" }}>{chain.chainName}</span>
+                                <i
+                                  className="bi bi-shop"
+                                  style={{
+                                    color:
+                                      idx === 0
+                                        ? "var(--sc-success)"
+                                        : "var(--sc-text-muted)",
+                                  }}
+                                ></i>
+                                <span
+                                  className="fw-bold"
+                                  style={{ fontSize: "0.95rem" }}
+                                >
+                                  {chain.chainName}
+                                </span>
                                 {idx === 0 && (
-                                  <span className="sc-badge" style={{
-                                    background: "var(--sc-success)", color: "#fff",
-                                    fontSize: "0.7rem", padding: "2px 8px",
-                                  }}>
+                                  <span
+                                    className="sc-badge"
+                                    style={{
+                                      background: "var(--sc-success)",
+                                      color: "#fff",
+                                      fontSize: "0.7rem",
+                                      padding: "2px 8px",
+                                    }}
+                                  >
                                     הכי זול
                                   </span>
                                 )}
                               </div>
                               <div className="d-flex align-items-center gap-2">
                                 {!chain.complete && (
-                                  <span style={{ fontSize: "0.75rem", color: "#b45309" }}>
-                                    <i className="bi bi-exclamation-triangle me-1"></i>חסרים {chain.missingCount}
+                                  <span
+                                    style={{
+                                      fontSize: "0.75rem",
+                                      color: "#b45309",
+                                    }}
+                                  >
+                                    <i className="bi bi-exclamation-triangle me-1"></i>
+                                    חסרים {chain.missingCount}
                                   </span>
                                 )}
-                                <span className="fw-bold" style={{
-                                  fontSize: "1.1rem",
-                                  color: idx === 0 ? "var(--sc-success)" : "var(--sc-text)",
-                                }}>
+                                <span
+                                  className="fw-bold"
+                                  style={{
+                                    fontSize: "1.1rem",
+                                    color:
+                                      idx === 0
+                                        ? "var(--sc-success)"
+                                        : "var(--sc-text)",
+                                  }}
+                                >
                                   ₪{chain.total.toFixed(2)}
                                 </span>
                               </div>
                             </div>
 
                             {/* Expandable item breakdown */}
-                            <details style={{ borderTop: "1px solid var(--sc-border)" }}>
-                              <summary style={{
-                                padding: "8px 16px", cursor: "pointer",
-                                fontSize: "0.8rem", color: "var(--sc-text-muted)",
-                                userSelect: "none",
-                              }}>
+                            <details
+                              style={{
+                                borderTop: "1px solid var(--sc-border)",
+                              }}
+                            >
+                              <summary
+                                style={{
+                                  padding: "8px 16px",
+                                  cursor: "pointer",
+                                  fontSize: "0.8rem",
+                                  color: "var(--sc-text-muted)",
+                                  userSelect: "none",
+                                }}
+                              >
                                 פירוט פריטים ({chain.items.length})
                               </summary>
                               <div style={{ padding: "0 16px 12px" }}>
@@ -598,23 +880,51 @@ const ListDetail = () => {
                                     className="d-flex justify-content-between align-items-center"
                                     style={{
                                       padding: "6px 0",
-                                      borderBottom: i < chain.items.length - 1 ? "1px solid var(--sc-border)" : "none",
+                                      borderBottom:
+                                        i < chain.items.length - 1
+                                          ? "1px solid var(--sc-border)"
+                                          : "none",
                                       fontSize: "0.82rem",
                                     }}
                                   >
-                                    <span style={{
-                                      color: ci.available ? "var(--sc-text)" : "#dc2626",
-                                    }}>
+                                    <span
+                                      style={{
+                                        color: ci.available
+                                          ? "var(--sc-text)"
+                                          : "#dc2626",
+                                      }}
+                                    >
                                       {ci.itemName}
-                                      {ci.quantity > 1 && <span style={{ color: "var(--sc-text-muted)" }}> x{ci.quantity}</span>}
+                                      {ci.quantity > 1 && (
+                                        <span
+                                          style={{
+                                            color: "var(--sc-text-muted)",
+                                          }}
+                                        >
+                                          {" "}
+                                          x{ci.quantity}
+                                        </span>
+                                      )}
                                     </span>
                                     {ci.available ? (
-                                      <span style={{ color: "var(--sc-text-muted)" }}>
+                                      <span
+                                        style={{
+                                          color: "var(--sc-text-muted)",
+                                        }}
+                                      >
                                         ₪{ci.price.toFixed(2)}
-                                        {ci.quantity > 1 && ` = ₪${ci.subtotal.toFixed(2)}`}
+                                        {ci.quantity > 1 &&
+                                          ` = ₪${ci.subtotal.toFixed(2)}`}
                                       </span>
                                     ) : (
-                                      <span style={{ color: "#dc2626", fontWeight: 600 }}>לא זמין</span>
+                                      <span
+                                        style={{
+                                          color: "#dc2626",
+                                          fontWeight: 600,
+                                        }}
+                                      >
+                                        לא זמין
+                                      </span>
                                     )}
                                   </div>
                                 ))}
@@ -629,18 +939,36 @@ const ListDetail = () => {
               </div>
 
               <div className="sc-modal-footer">
-                <button className="sc-btn sc-btn-ghost" onClick={() => setShowCompare(false)}>סגור</button>
+                <button
+                  className="sc-btn sc-btn-ghost"
+                  onClick={() => setShowCompare(false)}
+                >
+                  סגור
+                </button>
               </div>
             </div>
           </div>
         )}
         {/* Children Management Modal */}
         {showChildrenModal && (
-          <div className="sc-modal-overlay" onClick={() => setShowChildrenModal(false)} dir="rtl">
-            <div className="sc-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: "440px" }}>
+          <div
+            className="sc-modal-overlay"
+            onClick={() => setShowChildrenModal(false)}
+            dir="rtl"
+          >
+            <div
+              className="sc-modal"
+              onClick={(e) => e.stopPropagation()}
+              style={{ maxWidth: "440px" }}
+            >
               <div className="sc-modal-header">
-                <h5><i className="bi bi-people me-2"></i>ניהול גישת ילדים</h5>
-                <button className="sc-icon-btn" onClick={() => setShowChildrenModal(false)}>
+                <h5>
+                  <i className="bi bi-people me-2"></i>ניהול גישת ילדים
+                </h5>
+                <button
+                  className="sc-icon-btn"
+                  onClick={() => setShowChildrenModal(false)}
+                >
                   <i className="bi bi-x-lg"></i>
                 </button>
               </div>
@@ -648,11 +976,20 @@ const ListDetail = () => {
               <div className="sc-modal-body">
                 {childrenLoading ? (
                   <div className="text-center py-4">
-                    <div className="sc-spinner" style={{ margin: "0 auto" }}></div>
+                    <div
+                      className="sc-spinner"
+                      style={{ margin: "0 auto" }}
+                    ></div>
                   </div>
                 ) : childrenList.length === 0 ? (
-                  <div className="text-center py-4" style={{ color: "var(--sc-text-muted)" }}>
-                    <i className="bi bi-person-x" style={{ fontSize: "2rem", opacity: 0.4 }}></i>
+                  <div
+                    className="text-center py-4"
+                    style={{ color: "var(--sc-text-muted)" }}
+                  >
+                    <i
+                      className="bi bi-person-x"
+                      style={{ fontSize: "2rem", opacity: 0.4 }}
+                    ></i>
                     <p className="mt-2 mb-0">אין חשבונות ילדים מקושרים</p>
                     <small>צור חשבון ילד בהגדרות הפרופיל</small>
                   </div>
@@ -665,40 +1002,78 @@ const ListDetail = () => {
                         style={{
                           padding: "12px 16px",
                           borderRadius: "var(--sc-radius)",
-                          background: child.is_member ? "rgba(16, 185, 129, 0.06)" : "var(--sc-bg)",
-                          border: child.is_member ? "1px solid rgba(16, 185, 129, 0.2)" : "1px solid var(--sc-border)",
+                          background: child.is_member
+                            ? "rgba(16, 185, 129, 0.06)"
+                            : "var(--sc-bg)",
+                          border: child.is_member
+                            ? "1px solid rgba(16, 185, 129, 0.2)"
+                            : "1px solid var(--sc-border)",
                         }}
                       >
                         <div className="d-flex align-items-center gap-2">
-                          <div style={{
-                            width: "34px", height: "34px", borderRadius: "50%",
-                            background: "linear-gradient(135deg, rgba(79,70,229,0.1), rgba(6,182,212,0.08))",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                          }}>
-                            <i className="bi bi-person" style={{ color: "var(--sc-primary)", fontSize: "0.9rem" }}></i>
+                          <div
+                            style={{
+                              width: "34px",
+                              height: "34px",
+                              borderRadius: "50%",
+                              background:
+                                "linear-gradient(135deg, rgba(79,70,229,0.1), rgba(6,182,212,0.08))",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            <i
+                              className="bi bi-person"
+                              style={{
+                                color: "var(--sc-primary)",
+                                fontSize: "0.9rem",
+                              }}
+                            ></i>
                           </div>
                           <div>
-                            <div className="fw-bold" style={{ fontSize: "0.9rem" }}>{child.first_name}</div>
+                            <div
+                              className="fw-bold"
+                              style={{ fontSize: "0.9rem" }}
+                            >
+                              {child.first_name}
+                            </div>
                             {child.username && (
-                              <small style={{ color: "var(--sc-text-muted)" }}>@{child.username}</small>
+                              <small style={{ color: "var(--sc-text-muted)" }}>
+                                @{child.username}
+                              </small>
                             )}
                           </div>
                         </div>
                         <div
-                          onClick={() => handleToggleChild(child.id, child.is_member)}
+                          onClick={() =>
+                            handleToggleChild(child.id, child.is_member)
+                          }
                           style={{
-                            width: "44px", height: "24px", borderRadius: "12px", cursor: "pointer",
-                            background: child.is_member ? "var(--sc-success)" : "var(--sc-border)",
-                            position: "relative", transition: "background 0.2s ease",
+                            width: "44px",
+                            height: "24px",
+                            borderRadius: "12px",
+                            cursor: "pointer",
+                            background: child.is_member
+                              ? "var(--sc-success)"
+                              : "var(--sc-border)",
+                            position: "relative",
+                            transition: "background 0.2s ease",
                           }}
                         >
-                          <div style={{
-                            width: "20px", height: "20px", borderRadius: "50%",
-                            background: "#fff", position: "absolute", top: "2px",
-                            right: child.is_member ? "2px" : "22px",
-                            transition: "right 0.2s ease",
-                            boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
-                          }} />
+                          <div
+                            style={{
+                              width: "20px",
+                              height: "20px",
+                              borderRadius: "50%",
+                              background: "#fff",
+                              position: "absolute",
+                              top: "2px",
+                              right: child.is_member ? "2px" : "22px",
+                              transition: "right 0.2s ease",
+                              boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                            }}
+                          />
                         </div>
                       </div>
                     ))}
@@ -707,7 +1082,12 @@ const ListDetail = () => {
               </div>
 
               <div className="sc-modal-footer">
-                <button className="sc-btn sc-btn-ghost" onClick={() => setShowChildrenModal(false)}>סגור</button>
+                <button
+                  className="sc-btn sc-btn-ghost"
+                  onClick={() => setShowChildrenModal(false)}
+                >
+                  סגור
+                </button>
               </div>
             </div>
           </div>

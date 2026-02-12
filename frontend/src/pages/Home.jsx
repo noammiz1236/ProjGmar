@@ -4,7 +4,7 @@ import { AuthContext } from "../context/AuthContext";
 import api from "../api";
 
 const Home = () => {
-  const { user } = useContext(AuthContext);
+  const { user, isLinkedChild } = useContext(AuthContext);
   const [lists, setLists] = useState([]);
   const [loadingLists, setLoadingLists] = useState(false);
 
@@ -79,12 +79,14 @@ const Home = () => {
     );
   }
 
-  const quickActions = [
+  const allQuickActions = [
     { to: "/list", icon: "bi-clipboard-check", label: "הרשימות שלי", color: "#4f46e5" },
     { to: "/store", icon: "bi-shop", label: "חנות", color: "#06b6d4" },
-    { to: "/templates", icon: "bi-files", label: "תבניות", color: "#8b5cf6" },
+    { to: "/templates", icon: "bi-files", label: "תבניות", color: "#8b5cf6", parentOnly: true },
     { to: "/profile", icon: "bi-gear", label: "הגדרות", color: "#64748b" },
   ];
+
+  const quickActions = allQuickActions.filter(action => !action.parentOnly || !isLinkedChild);
 
   return (
     <div className="page-fade-in" dir="rtl">
@@ -129,10 +131,14 @@ const Home = () => {
           ) : lists.length === 0 ? (
             <div className="sc-card">
               <div className="sc-empty" style={{ padding: "2rem" }}>
-                <p style={{ color: "var(--sc-text-muted)" }}>אין לך רשימות עדיין</p>
-                <Link to="/list" className="sc-btn sc-btn-primary">
-                  <i className="bi bi-plus-lg me-1"></i> צור רשימה חדשה
-                </Link>
+                <p style={{ color: "var(--sc-text-muted)" }}>
+                  {isLinkedChild ? "אין רשימות עדיין" : "אין לך רשימות עדיין"}
+                </p>
+                {!isLinkedChild && (
+                  <Link to="/list" className="sc-btn sc-btn-primary">
+                    <i className="bi bi-plus-lg me-1"></i> צור רשימה חדשה
+                  </Link>
+                )}
               </div>
             </div>
           ) : (

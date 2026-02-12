@@ -127,6 +127,7 @@ CREATE TABLE app.list_items (
   paid_by INT,
   paid_at TIMESTAMP,
   note TEXT,
+  note_by INT,
   product_id INT REFERENCES app.items(id) ON DELETE SET NULL,
   addat TIMESTAMP DEFAULT NOW(),
   updatedat TIMESTAMP DEFAULT NOW()

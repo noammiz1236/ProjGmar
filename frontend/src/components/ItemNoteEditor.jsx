@@ -1,12 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useContext } from "react";
+import { AuthContext } from "../context/AuthContext";
 import socket from "../socket";
 
 const ItemNoteEditor = ({ item, listId }) => {
+  const { user } = useContext(AuthContext);
   const [editing, setEditing] = useState(false);
   const [note, setNote] = useState(item.note || "");
 
   const handleSave = () => {
-    socket.emit("update_note", { itemId: item.id, listId, note });
+    socket.emit("update_note", { itemId: item.id, listId, note, userId: user.id });
     setEditing(false);
   };
 
@@ -33,7 +35,16 @@ const ItemNoteEditor = ({ item, listId }) => {
       style={{ cursor: "pointer" }}
       onClick={() => setEditing(true)}
     >
-      {item.note || "לחץ להוספת הערה..."}
+      {item.note ? (
+        <>
+          {item.note}
+          {item.note_by_name && (
+            <span style={{ fontSize: "0.75rem", opacity: 0.7 }}> — {item.note_by_name}</span>
+          )}
+        </>
+      ) : (
+        "לחץ להוספת הערה..."
+      )}
     </small>
   );
 };
