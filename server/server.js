@@ -19,8 +19,9 @@ const saltRounds = 10;
 
 const io = new Server(server, {
   cors: {
-    origin: process.env.host_allowed,
+    origin: process.env.HOST_ALLOWED || "http://localhost:5173",
     methods: ["GET", "POST"],
+    credentials: true,
   },
 });
 const { Pool } = pg;
@@ -86,7 +87,6 @@ const generateTokens = async (userId) => {
   return { accessToken, refreshToken };
 };
 
-
 const createTransporter = () => {
   return nodemailer.createTransport({
     // creating shaliah (transporter)
@@ -97,9 +97,7 @@ const createTransporter = () => {
       pass: process.env.SMTP_PASS,
     },
   });
-}
-
-
+};
 
 // Middleware הגדרות כלליות
 app.use(morgan("dev"));
@@ -122,8 +120,8 @@ db.query("SELECT NOW()", (err, res) => {
 });
 
 app.get("/api/search", async (req, res) => {
-  console.log(req.query);
   const search = req.query.q;
+  console.log(search);
   if (!search) return res.json([]);
   try {
     const searchTerm = `%${search}%`;
@@ -277,7 +275,6 @@ app.get("/api/verify-email", async (req, res) => {
     if (!tokenRow.data) {
       return res.status(400).json({ message: "Invalid token data" });
     }
-
 
     const userData = JSON.parse(tokenRow.data);
     const { first_name, last_name, email, password_hash } = userData;
@@ -522,8 +519,6 @@ app.get("/api/store", async (req, res) => {
   }
 });
 
-
-
 // password change only if user logged in!!!!
 app.put("/api/user/password", authenticateToken, async (req, res) => {
   const userId = req.userId;
@@ -571,8 +566,6 @@ app.put("/api/user/password", authenticateToken, async (req, res) => {
   }
 });
 
-
-
 app.post("/api/forgot-password", async (req, res) => {
   const { email } = req.body;
   if (!email) {
@@ -582,27 +575,32 @@ app.post("/api/forgot-password", async (req, res) => {
     return res.status(400).json({ message: "Invalid email format" });
   }
   try {
-    const results = await db.query("SELECT id FROM app2.users WHERE email = $1", [email])
+    const results = await db.query(
+      "SELECT id FROM app2.users WHERE email = $1",
+      [email],
+    );
     if (results.rows.length === 0) {
-      return res.status(404).json({ message: "User not found" })
+      return res.status(404).json({ message: "User not found" });
     }
     const userId = results.rows[0].id;
-    const { rows } = await db.query(`INSERT INTO app2.tokens
+    const { rows } = await db.query(
+      `INSERT INTO app2.tokens
       (user_id,type,expires_at,used,data)
       VALUES($1,'reset_password',NOW() + interval '15 minutes',false,NULL) RETURNING ID`,
-      [userId])
+      [userId],
+    );
     const tokenId = rows[0].id;
     const token = jwt.sign(
       {
         sub: userId,
         jti: tokenId,
-        type: 'reset_password'
+        type: "reset_password",
       },
       process.env.JWT_SECRET,
       {
-        expiresIn: '15m'
-      }
-    )
+        expiresIn: "15m",
+      },
+    );
     const resetUrl = `http://localhost:5173/reset-password?token=${token}`;
     // send email
     const transporter = createTransporter();
@@ -615,14 +613,12 @@ app.post("/api/forgot-password", async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: "Error resetting password" });
-
   }
-})
-
+});
 
 app.post("/api/reset-password", async (req, res) => {
-  const { token, newPassword, confirmNewPassword } = req.body
-  console.log(token)
+  const { token, newPassword, confirmNewPassword } = req.body;
+  console.log(token);
   if (!token || !newPassword || !confirmNewPassword) {
     return res.status(400).json({ message: "Missing fields" });
   }
@@ -633,14 +629,13 @@ app.post("/api/reset-password", async (req, res) => {
     return res.status(400).json({ message: "Password too weak" });
   }
   try {
-
     const decodedToken = jwt.verify(token, process.env.JWT_SECRET);
     const userId = decodedToken.sub;
     const { rows } = await db.query(
       `SELECT expires_at, used
    FROM app2.tokens
    WHERE user_id = $1 AND type = 'reset_password' AND id = $2 AND expires_at > NOW()`,
-      [userId, decodedToken.jti]
+      [userId, decodedToken.jti],
     );
     if (rows.length === 0) {
       return res.status(404).json({ message: "Token not found" });
@@ -651,37 +646,38 @@ app.post("/api/reset-password", async (req, res) => {
       return res.status(400).json({ message: "Token already used" });
     }
 
-
     const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
 
-    const results = await db.query(`SELECT password_hash FROM app2.users WHERE id = $1`, [userId]);
+    const results = await db.query(
+      `SELECT password_hash FROM app2.users WHERE id = $1`,
+      [userId],
+    );
     if (results.rows.length === 0) {
       return res.status(404).json({ message: "Token not found" });
     }
 
     const oldPassword = results.rows[0].password_hash;
     if (oldPassword === hashedPassword) {
-      return res.status(400).json({ message: "New password must differ from current" });
+      return res
+        .status(400)
+        .json({ message: "New password must differ from current" });
     }
 
+    await db.query(`UPDATE app2.users SET password_hash = $1 WHERE id = $2`, [
+      hashedPassword,
+      userId,
+    ]);
 
-    await db.query(`UPDATE app2.users SET password_hash = $1 WHERE id = $2`, [hashedPassword, userId]);
-
-    await db.query(`UPDATE app2.tokens SET used = true WHERE id = $1`, [decodedToken.jti]);
+    await db.query(`UPDATE app2.tokens SET used = true WHERE id = $1`, [
+      decodedToken.jti,
+    ]);
 
     return res.status(200).json({ message: "Password reset successfully" });
-
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: "Error resetting password" });
   }
-})
-
-
-
-
-
-
+});
 
 // פונקציה לניקוי טוקנים שפג תוקפם (רצה פעם ביום)
 // const cleanupExpiredTokens = async () => {
@@ -733,8 +729,11 @@ app.get("/api/lists/:id/items", authenticateToken, async (req, res) => {
       return res.status(403).json({ message: "Not a member of this list" });
     }
 
-    const listRes = await db.query("SELECT * FROM app.list WHERE id = $1", [listId]);
-    if (listRes.rows.length === 0) return res.status(404).json({ message: "List not found" });
+    const listRes = await db.query("SELECT * FROM app.list WHERE id = $1", [
+      listId,
+    ]);
+    if (listRes.rows.length === 0)
+      return res.status(404).json({ message: "List not found" });
 
     const itemsRes = await db.query(
       `SELECT li.*, u.first_name AS paid_by_name
@@ -803,7 +802,11 @@ app.get("/api/lists/:id/compare", authenticateToken, async (req, res) => {
     const chainMap = {};
     for (const row of pricesRes.rows) {
       if (!chainMap[row.chain_id]) {
-        chainMap[row.chain_id] = { chainId: row.chain_id, chainName: row.chain_name, prices: {} };
+        chainMap[row.chain_id] = {
+          chainId: row.chain_id,
+          chainName: row.chain_name,
+          prices: {},
+        };
       }
       chainMap[row.chain_id].prices[row.product_id] = parseFloat(row.price);
     }
@@ -818,10 +821,22 @@ app.get("/api/lists/:id/compare", authenticateToken, async (req, res) => {
         if (price !== undefined) {
           const subtotal = price * qty;
           total += subtotal;
-          return { itemName: li.itemname, price, quantity: qty, subtotal, available: true };
+          return {
+            itemName: li.itemname,
+            price,
+            quantity: qty,
+            subtotal,
+            available: true,
+          };
         } else {
           missingCount++;
-          return { itemName: li.itemname, price: 0, quantity: qty, subtotal: 0, available: false };
+          return {
+            itemName: li.itemname,
+            price: 0,
+            quantity: qty,
+            subtotal: 0,
+            available: false,
+          };
         }
       });
       return {
@@ -852,7 +867,9 @@ app.post("/api/lists/:id/invite", authenticateToken, async (req, res) => {
       [listId, req.userId],
     );
     if (membership.rows.length === 0 || membership.rows[0].status !== "admin") {
-      return res.status(403).json({ message: "Only admins can create invites" });
+      return res
+        .status(403)
+        .json({ message: "Only admins can create invites" });
     }
 
     const crypto = await import("crypto");
@@ -864,7 +881,8 @@ app.post("/api/lists/:id/invite", authenticateToken, async (req, res) => {
       [listId, inviteCode, req.userId],
     );
 
-    const host = process.env.host_allowed?.split(",")[0] || "http://localhost:5173";
+    const host =
+      process.env.host_allowed?.split(",")[0] || "http://localhost:5173";
     return res.json({ inviteLink: `${host}/invite/${inviteCode}` });
   } catch (err) {
     console.error(err);
@@ -892,46 +910,68 @@ app.get("/api/lists/:id/children", authenticateToken, async (req, res) => {
 });
 
 // POST /api/lists/:id/children/:childId — add child to list
-app.post("/api/lists/:id/children/:childId", authenticateToken, async (req, res) => {
-  const { id: listId, childId } = req.params;
-  try {
-    // Verify child belongs to this parent
-    const child = await db.query("SELECT id FROM app2.users WHERE id = $1 AND parent_id = $2", [childId, req.userId]);
-    if (child.rows.length === 0) return res.status(403).json({ message: "Not your child" });
+app.post(
+  "/api/lists/:id/children/:childId",
+  authenticateToken,
+  async (req, res) => {
+    const { id: listId, childId } = req.params;
+    try {
+      // Verify child belongs to this parent
+      const child = await db.query(
+        "SELECT id FROM app2.users WHERE id = $1 AND parent_id = $2",
+        [childId, req.userId],
+      );
+      if (child.rows.length === 0)
+        return res.status(403).json({ message: "Not your child" });
 
-    await db.query(
-      `INSERT INTO app.list_members (list_id, user_id, status) VALUES ($1, $2, 'member')
+      await db.query(
+        `INSERT INTO app.list_members (list_id, user_id, status) VALUES ($1, $2, 'member')
        ON CONFLICT (list_id, user_id) DO NOTHING`,
-      [listId, childId],
-    );
-    return res.json({ success: true });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ message: "Error adding child" });
-  }
-});
+        [listId, childId],
+      );
+      return res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ message: "Error adding child" });
+    }
+  },
+);
 
 // DELETE /api/lists/:id/children/:childId — remove child from list
-app.delete("/api/lists/:id/children/:childId", authenticateToken, async (req, res) => {
-  const { id: listId, childId } = req.params;
-  try {
-    const child = await db.query("SELECT id FROM app2.users WHERE id = $1 AND parent_id = $2", [childId, req.userId]);
-    if (child.rows.length === 0) return res.status(403).json({ message: "Not your child" });
+app.delete(
+  "/api/lists/:id/children/:childId",
+  authenticateToken,
+  async (req, res) => {
+    const { id: listId, childId } = req.params;
+    try {
+      const child = await db.query(
+        "SELECT id FROM app2.users WHERE id = $1 AND parent_id = $2",
+        [childId, req.userId],
+      );
+      if (child.rows.length === 0)
+        return res.status(403).json({ message: "Not your child" });
 
-    await db.query("DELETE FROM app.list_members WHERE list_id = $1 AND user_id = $2", [listId, childId]);
-    return res.json({ success: true });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ message: "Error removing child" });
-  }
-});
+      await db.query(
+        "DELETE FROM app.list_members WHERE list_id = $1 AND user_id = $2",
+        [listId, childId],
+      );
+      return res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ message: "Error removing child" });
+    }
+  },
+);
 
 // POST /api/kid-requests — child requests to add item
 app.post("/api/kid-requests", authenticateToken, async (req, res) => {
   const { listId, itemName, price, storeName, quantity, productId } = req.body;
   try {
     // Get the child's parent
-    const userRes = await db.query("SELECT parent_id FROM app2.users WHERE id = $1", [req.userId]);
+    const userRes = await db.query(
+      "SELECT parent_id FROM app2.users WHERE id = $1",
+      [req.userId],
+    );
     if (userRes.rows.length === 0 || !userRes.rows[0].parent_id) {
       return res.status(403).json({ message: "Not a child account" });
     }
@@ -940,7 +980,16 @@ app.post("/api/kid-requests", authenticateToken, async (req, res) => {
     await db.query(
       `INSERT INTO app2.kid_requests (child_id, parent_id, list_id, item_name, price, store_name, quantity, product_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [req.userId, parentId, listId, itemName, price, storeName, quantity || 1, productId || null],
+      [
+        req.userId,
+        parentId,
+        listId,
+        itemName,
+        price,
+        storeName,
+        quantity || 1,
+        productId || null,
+      ],
     );
     return res.status(201).json({ message: "Request sent" });
   } catch (err) {

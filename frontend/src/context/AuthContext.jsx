@@ -1,6 +1,6 @@
 import { createContext, useEffect, useState, useRef } from "react";
 import axios from "axios";
-import api, { setAccessToken } from "../api";
+import api, { setAccessToken, API_URL } from "../api";
 import socket from "../socket";
 
 export const AuthContext = createContext();
@@ -20,7 +20,7 @@ export const AuthProvider = ({ children }) => {
       try {
         // ניסיון שקט לחידוש טוקן בעזרת העוגייה
         const res = await axios.post(
-          "http://localhost:3000/api/refresh",
+          `${API_URL}/api/refresh`,
           {}, // body ריק
           { withCredentials: true } // ← כאן צריך להיות
         );
