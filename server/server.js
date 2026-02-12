@@ -890,6 +890,95 @@ app.post("/api/lists/:id/invite", authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/family/children — get all children for parent
+app.get("/api/family/children", authenticateToken, async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT id, first_name, username, created_at
+       FROM app2.users
+       WHERE parent_id = $1
+       ORDER BY created_at DESC`,
+      [req.userId]
+    );
+    return res.json({ children: rows });
+  } catch (err) {
+    console.error("Error fetching children:", err);
+    return res.status(500).json({ message: "Error fetching children" });
+  }
+});
+
+// POST /api/family/create-child — create child account
+app.post("/api/family/create-child", authenticateToken, async (req, res) => {
+  const { firstName, username, password } = req.body;
+  
+  if (!firstName || !username || !password) {
+    return res.status(400).json({ message: "All fields are required" });
+  }
+  
+  if (password.length < 4) {
+    return res.status(400).json({ message: "Password must be at least 4 characters" });
+  }
+  
+  try {
+    const existingUser = await db.query(
+      "SELECT id FROM app2.users WHERE username = $1",
+      [username]
+    );
+    
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({ message: "Username already taken" });
+    }
+    
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    
+    const result = await db.query(
+      `INSERT INTO app2.users (first_name, username, password, parent_id, created_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       RETURNING id, first_name, username`,
+      [firstName, username, hashedPassword, req.userId]
+    );
+    
+    const child = result.rows[0];
+    
+    return res.status(201).json({ 
+      message: "Child account created successfully",
+      child: child
+    });
+  } catch (err) {
+    console.error("Error creating child account:", err);
+    return res.status(500).json({ message: "Error creating child account" });
+  }
+});
+
+// DELETE /api/family/delete-child/:childId — delete child account
+app.delete("/api/family/delete-child/:childId", authenticateToken, async (req, res) => {
+  const { childId } = req.params;
+  
+  try {
+    const child = await db.query(
+      "SELECT id FROM app2.users WHERE id = $1 AND parent_id = $2",
+      [childId, req.userId]
+    );
+    
+    if (child.rows.length === 0) {
+      return res.status(403).json({ message: "Not your child account" });
+    }
+    
+    await db.query(
+      "DELETE FROM app2.users WHERE id = $1",
+      [childId]
+    );
+    
+    return res.json({ 
+      success: true,
+      message: "Child account deleted successfully" 
+    });
+  } catch (err) {
+    console.error("Error deleting child account:", err);
+    return res.status(500).json({ message: "Error deleting child account" });
+  }
+});
+
 // GET /api/lists/:id/children — get parent's children with membership status
 app.get("/api/lists/:id/children", authenticateToken, async (req, res) => {
   const listId = req.params.id;
@@ -998,6 +1087,27 @@ app.post("/api/kid-requests", authenticateToken, async (req, res) => {
   }
 });
 
+// GET comments for an item
+app.get("/api/lists/:listId/items/:itemId/comments", authenticateToken, async (req, res) => {
+  const { listId, itemId } = req.params;
+  
+  try {
+    const result = await db.query(
+      `SELECT c.id, c.item_id, c.user_id, c.comment, c.created_at, u.first_name
+       FROM app2.item_comments c
+       JOIN app2.users u ON c.user_id = u.id
+       WHERE c.item_id = $1 AND c.list_id = $2
+       ORDER BY c.created_at ASC`,
+      [itemId, listId]
+    );
+    
+    res.json({ comments: result.rows });
+  } catch (err) {
+    console.error("Error fetching comments:", err);
+    res.status(500).json({ message: "Error fetching comments" });
+  }
+});
+
 // Socket.io handlers
 io.on("connection", (socket) => {
   socket.on("join_list", (listId) => {
@@ -1091,6 +1201,104 @@ io.on("connection", (socket) => {
         callback({ success: false, msg: `db eror` });
       }
     });
+  });
+
+  // DELETE ITEM
+  socket.on("delete_item", async (data) => {
+    const { itemId, listId } = data;
+    try {
+      await db.query("DELETE FROM app.list_items WHERE id = $1", [itemId]);
+      io.to(listId).emit("item_deleted", { itemId });
+    } catch (err) {
+      console.error("Error deleting item:", err);
+    }
+  });
+
+  // MARK PAID
+  socket.on("mark_paid", async (data) => {
+    const { itemId, listId, userId } = data;
+    try {
+      await db.query(
+        "UPDATE app.list_items SET paid_by = $1 WHERE id = $2",
+        [userId, itemId]
+      );
+      const userRes = await db.query(
+        "SELECT first_name FROM app2.users WHERE id = $1",
+        [userId]
+      );
+      const userName = userRes.rows[0]?.first_name || "User";
+      
+      io.to(listId).emit("item_paid_status", { 
+        itemId, 
+        paidBy: userId, 
+        paidByName: userName 
+      });
+    } catch (err) {
+      console.error("Error marking paid:", err);
+    }
+  });
+
+  // UNMARK PAID
+  socket.on("unmark_paid", async (data) => {
+    const { itemId, listId } = data;
+    try {
+      await db.query(
+        "UPDATE app.list_items SET paid_by = NULL WHERE id = $1",
+        [itemId]
+      );
+      io.to(listId).emit("item_paid_status", { itemId, paidBy: null });
+    } catch (err) {
+      console.error("Error unmarking paid:", err);
+    }
+  });
+
+  // UPDATE NOTE
+  socket.on("update_note", async (data) => {
+    const { itemId, listId, note } = data;
+    try {
+      await db.query(
+        "UPDATE app.list_items SET note = $1 WHERE id = $2",
+        [note, itemId]
+      );
+      io.to(listId).emit("item_note_updated", { itemId, note });
+    } catch (err) {
+      console.error("Error updating note:", err);
+    }
+  });
+
+  // ADD COMMENT
+  socket.on("add_comment", async (data) => {
+    const { itemId, listId, userId, comment } = data;
+    try {
+      const result = await db.query(
+        `INSERT INTO app2.item_comments (item_id, list_id, user_id, comment, created_at)
+         VALUES ($1, $2, $3, $4, NOW())
+         RETURNING id, created_at`,
+        [itemId, listId, userId, comment]
+      );
+      
+      const userRes = await db.query(
+        "SELECT first_name FROM app2.users WHERE id = $1",
+        [userId]
+      );
+      const userName = userRes.rows[0]?.first_name || "User";
+      
+      const newComment = {
+        id: result.rows[0].id,
+        item_id: itemId,
+        user_id: userId,
+        first_name: userName,
+        comment: comment,
+        created_at: result.rows[0].created_at
+      };
+      
+      io.to(listId).emit("receive_comment", { 
+        itemId, 
+        comment: newComment 
+      });
+    } catch (err) {
+      console.error("Error adding comment:", err);
+    }
   });
 });
 
