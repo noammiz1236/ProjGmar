@@ -253,6 +253,34 @@ const ListDetail = () => {
     }
   };
 
+  const handleDeleteList = async () => {
+    if (!confirm(`האם למחוק את הרשימה "${list?.list_name}"? פעולה זו תמחק את כל הפריטים והחברים.`)) {
+      return;
+    }
+
+    try {
+      await api.delete(`/api/lists/${listId}`);
+      navigate("/list");
+    } catch (err) {
+      console.error("Error deleting list:", err);
+      alert(err.response?.data?.message || "שגיאה במחיקת הרשימה");
+    }
+  };
+
+  const handleLeaveList = async () => {
+    if (!confirm(`האם לעזוב את הרשימה "${list?.list_name}"?`)) {
+      return;
+    }
+
+    try {
+      await api.post(`/api/lists/${listId}/leave`);
+      navigate("/list");
+    } catch (err) {
+      console.error("Error leaving list:", err);
+      alert(err.response?.data?.message || "שגיאה ביציאה מהרשימה");
+    }
+  };
+
   if (loading) {
     return (
       <div className="sc-loading-page">
@@ -310,7 +338,23 @@ const ListDetail = () => {
                   >
                     <i className="bi bi-people me-1"></i> ילדים
                   </button>
+                  <button
+                    className="sc-btn sc-btn-ghost"
+                    onClick={handleDeleteList}
+                    style={{ fontSize: "0.8rem", padding: "6px 12px", color: "var(--sc-danger)" }}
+                  >
+                    <i className="bi bi-trash me-1"></i> מחק
+                  </button>
                 </>
+              )}
+              {userRole === "member" && (
+                <button
+                  className="sc-btn sc-btn-ghost"
+                  onClick={handleLeaveList}
+                  style={{ fontSize: "0.8rem", padding: "6px 12px", color: "var(--sc-danger)" }}
+                >
+                  <i className="bi bi-box-arrow-left me-1"></i> עזוב
+                </button>
               )}
               <button
                 className="sc-btn sc-btn-ghost"

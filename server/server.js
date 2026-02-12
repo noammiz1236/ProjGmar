@@ -123,9 +123,6 @@ app.get("/api/search", async (req, res) => {
   const search = req.query.q;
   if (!search) return res.json([]);
   try {
-    const searchTerm = `${search}%`;
-    console.log("Search term with wildcards:", searchTerm);
-
     const reply = await db.query(
       `SELECT DISTINCT ON (i.id)
        i.id as item_id,
@@ -141,10 +138,34 @@ app.get("/api/search", async (req, res) => {
        LEFT JOIN app.branches b ON b.id = p.branch_id
        LEFT JOIN app.chains c ON c.id = b.chain_id
        WHERE i.name ILIKE $1
-       ORDER BY i.id, p.price ASC NULLS LAST
-       LIMIT 10`,
-      [searchTerm],
+       ORDER BY i.id, p.price DESC NULLS LAST`,
+      [search],
     );
+    if (reply.rows.length > 0) {
+    } else {
+      const searchTerm = `${search}%`;
+      console.log("Search term with wildcards:", searchTerm);
+
+      reply = await db.query(
+        `SELECT DISTINCT ON (i.id)
+       i.id as item_id,
+       i.name as item_name,
+       i.barcode,
+       i.item_code,
+       p.price,
+       c.id as chain_id,
+       c.name as chain_name,
+       b.branch_name
+       FROM app.items i
+       LEFT JOIN app.prices p ON p.item_id = i.id
+       LEFT JOIN app.branches b ON b.id = p.branch_id
+       LEFT JOIN app.chains c ON c.id = b.chain_id
+       WHERE i.name ILIKE $1
+       ORDER BY i.id, p.price DESC NULLS LAST
+       LIMIT 15`,
+        [searchTerm],
+      );
+    }
     res.json(reply.rows);
   } catch (e) {
     console.error("Search error:", e.message);
@@ -871,6 +892,72 @@ app.get("/api/lists/:id/items", authenticateToken, async (req, res) => {
   }
 });
 
+// DELETE /api/lists/:id — delete a list (admin only)
+app.delete("/api/lists/:id", authenticateToken, async (req, res) => {
+  const listId = req.params.id;
+
+  try {
+    // Check if user is admin of this list
+    const membership = await db.query(
+      "SELECT status FROM app.list_members WHERE list_id = $1 AND user_id = $2",
+      [listId, req.userId],
+    );
+
+    if (membership.rows.length === 0) {
+      return res.status(403).json({ message: "Not a member of this list" });
+    }
+
+    if (membership.rows[0].status !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Only admin can delete the list" });
+    }
+
+    // Delete the list (CASCADE will delete list_items and list_members)
+    await db.query("DELETE FROM app.list WHERE id = $1", [listId]);
+
+    return res.json({ success: true, message: "List deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting list:", err);
+    return res.status(500).json({ message: "Error deleting list" });
+  }
+});
+
+// POST /api/lists/:id/leave — leave a list (members only, not admin)
+app.post("/api/lists/:id/leave", authenticateToken, async (req, res) => {
+  const listId = req.params.id;
+
+  try {
+    // Check if user is a member of this list
+    const membership = await db.query(
+      "SELECT status FROM app.list_members WHERE list_id = $1 AND user_id = $2",
+      [listId, req.userId],
+    );
+
+    if (membership.rows.length === 0) {
+      return res.status(403).json({ message: "Not a member of this list" });
+    }
+
+    if (membership.rows[0].status === "admin") {
+      return res.status(403).json({
+        message:
+          "Admin cannot leave the list. Delete it or transfer admin role first.",
+      });
+    }
+
+    // Remove user from list
+    await db.query(
+      "DELETE FROM app.list_members WHERE list_id = $1 AND user_id = $2",
+      [listId, req.userId],
+    );
+
+    return res.json({ success: true, message: "Left list successfully" });
+  } catch (err) {
+    console.error("Error leaving list:", err);
+    return res.status(500).json({ message: "Error leaving list" });
+  }
+});
+
 // GET /api/lists/:id/compare — price comparison across chains
 app.get("/api/lists/:id/compare", authenticateToken, async (req, res) => {
   const listId = req.params.id;
@@ -1057,7 +1144,7 @@ app.get("/api/family/children", authenticateToken, async (req, res) => {
        FROM app2.users
        WHERE parent_id = $1
        ORDER BY created_at DESC`,
-      [req.userId]
+      [req.userId],
     );
     return res.json({ children: rows });
   } catch (err) {
@@ -1075,23 +1162,27 @@ app.post("/api/family/create-child", authenticateToken, async (req, res) => {
   }
 
   if (password.length < 4) {
-    return res.status(400).json({ message: "Password must be at least 4 characters" });
+    return res
+      .status(400)
+      .json({ message: "Password must be at least 4 characters" });
   }
 
   try {
     // Prevent children from creating other children
     const requestingUser = await db.query(
       "SELECT parent_id FROM app2.users WHERE id = $1",
-      [req.userId]
+      [req.userId],
     );
 
     if (requestingUser.rows[0].parent_id !== null) {
-      return res.status(403).json({ message: "Child accounts cannot create other children" });
+      return res
+        .status(403)
+        .json({ message: "Child accounts cannot create other children" });
     }
 
     const existingUser = await db.query(
       "SELECT id FROM app2.users WHERE username = $1",
-      [username]
+      [username],
     );
 
     if (existingUser.rows.length > 0) {
@@ -1104,14 +1195,14 @@ app.post("/api/family/create-child", authenticateToken, async (req, res) => {
       `INSERT INTO app2.users (first_name, username, password, parent_id, created_at)
        VALUES ($1, $2, $3, $4, NOW())
        RETURNING id, first_name, username`,
-      [firstName, username, hashedPassword, req.userId]
+      [firstName, username, hashedPassword, req.userId],
     );
 
     const child = result.rows[0];
 
     return res.status(201).json({
       message: "Child account created successfully",
-      child: child
+      child: child,
     });
   } catch (err) {
     console.error("Error creating child account:", err);
@@ -1120,33 +1211,34 @@ app.post("/api/family/create-child", authenticateToken, async (req, res) => {
 });
 
 // DELETE /api/family/delete-child/:childId — delete child account
-app.delete("/api/family/delete-child/:childId", authenticateToken, async (req, res) => {
-  const { childId } = req.params;
+app.delete(
+  "/api/family/delete-child/:childId",
+  authenticateToken,
+  async (req, res) => {
+    const { childId } = req.params;
 
-  try {
-    const child = await db.query(
-      "SELECT id FROM app2.users WHERE id = $1 AND parent_id = $2",
-      [childId, req.userId]
-    );
+    try {
+      const child = await db.query(
+        "SELECT id FROM app2.users WHERE id = $1 AND parent_id = $2",
+        [childId, req.userId],
+      );
 
-    if (child.rows.length === 0) {
-      return res.status(403).json({ message: "Not your child account" });
+      if (child.rows.length === 0) {
+        return res.status(403).json({ message: "Not your child account" });
+      }
+
+      await db.query("DELETE FROM app2.users WHERE id = $1", [childId]);
+
+      return res.json({
+        success: true,
+        message: "Child account deleted successfully",
+      });
+    } catch (err) {
+      console.error("Error deleting child account:", err);
+      return res.status(500).json({ message: "Error deleting child account" });
     }
-
-    await db.query(
-      "DELETE FROM app2.users WHERE id = $1",
-      [childId]
-    );
-
-    return res.json({
-      success: true,
-      message: "Child account deleted successfully"
-    });
-  } catch (err) {
-    console.error("Error deleting child account:", err);
-    return res.status(500).json({ message: "Error deleting child account" });
-  }
-});
+  },
+);
 
 // GET /api/lists/:id/children — get parent's children with membership status
 app.get("/api/lists/:id/children", authenticateToken, async (req, res) => {
@@ -1336,26 +1428,103 @@ app.post("/api/kid-requests", authenticateToken, async (req, res) => {
   }
 });
 
+// POST /api/kid-requests/:id/resolve — approve or reject child request
+app.post(
+  "/api/kid-requests/:id/resolve",
+  authenticateToken,
+  async (req, res) => {
+    const requestId = req.params.id;
+    const { action } = req.body; // "approve" or "reject"
+
+    if (action !== "approve" && action !== "reject") {
+      return res.status(400).json({ message: "Invalid action" });
+    }
+
+    try {
+      // Get the request and verify it belongs to this parent
+      const requestResult = await db.query(
+        `SELECT kr.*, u.first_name as child_first_name
+       FROM app2.kid_requests kr
+       JOIN app2.users u ON u.id = kr.child_id
+       WHERE kr.id = $1 AND kr.parent_id = $2`,
+        [requestId, req.userId],
+      );
+
+      if (requestResult.rows.length === 0) {
+        return res.status(403).json({ message: "Not your child's request" });
+      }
+
+      const request = requestResult.rows[0];
+      const newStatus = action === "approve" ? "approved" : "rejected";
+
+      // Update request status
+      await db.query("UPDATE app2.kid_requests SET status = $1 WHERE id = $2", [
+        newStatus,
+        requestId,
+      ]);
+
+      // If approved, add the item to the list
+      if (action === "approve") {
+        const itemResult = await db.query(
+          `INSERT INTO app.list_items (listId, itemName, price, storeName, quantity, addby, addat, updatedat, product_id)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), $7)
+         RETURNING *`,
+          [
+            request.list_id,
+            request.item_name,
+            request.price || null,
+            request.store_name || null,
+            request.quantity || 1,
+            request.child_id, // Item added by the child
+            request.product_id || null,
+          ],
+        );
+
+        // Emit to list room so all members see the new item
+        io.to(String(request.list_id)).emit("receive_item", itemResult.rows[0]);
+      }
+
+      // Notify the child that their request was resolved
+      io.to(`user_${request.child_id}`).emit("request_resolved", {
+        requestId: requestId,
+        status: newStatus,
+      });
+
+      return res.json({
+        success: true,
+        message: action === "approve" ? "Request approved" : "Request rejected",
+      });
+    } catch (err) {
+      console.error("Error resolving request:", err);
+      return res.status(500).json({ message: "Error resolving request" });
+    }
+  },
+);
+
 // GET comments for an item
-app.get("/api/lists/:listId/items/:itemId/comments", authenticateToken, async (req, res) => {
-  const { listId, itemId } = req.params;
-  
-  try {
-    const result = await db.query(
-      `SELECT c.id, c.item_id, c.user_id, c.comment, c.created_at, u.first_name
-       FROM app2.item_comments c
+app.get(
+  "/api/lists/:listId/items/:itemId/comments",
+  authenticateToken,
+  async (req, res) => {
+    const { listId, itemId } = req.params;
+
+    try {
+      const result = await db.query(
+        `SELECT c.id, c.item_id, c.user_id, c.comment, c.created_at, u.first_name
+       FROM app.list_item_comments c
        JOIN app2.users u ON c.user_id = u.id
-       WHERE c.item_id = $1 AND c.list_id = $2
+       WHERE c.item_id = $1
        ORDER BY c.created_at ASC`,
-      [itemId, listId]
-    );
-    
-    res.json({ comments: result.rows });
-  } catch (err) {
-    console.error("Error fetching comments:", err);
-    res.status(500).json({ message: "Error fetching comments" });
-  }
-});
+        [itemId],
+      );
+
+      res.json({ comments: result.rows });
+    } catch (err) {
+      console.error("Error fetching comments:", err);
+      res.status(500).json({ message: "Error fetching comments" });
+    }
+  },
+);
 
 // Socket.io handlers
 io.on("connection", (socket) => {
@@ -1485,7 +1654,7 @@ io.on("connection", (socket) => {
         itemId,
         note,
         note_by: userId,
-        note_by_name
+        note_by_name,
       });
     } catch (err) {
       console.error("Error updating note:", err);
@@ -1566,20 +1735,20 @@ io.on("connection", (socket) => {
   socket.on("mark_paid", async (data) => {
     const { itemId, listId, userId } = data;
     try {
-      await db.query(
-        "UPDATE app.list_items SET paid_by = $1 WHERE id = $2",
-        [userId, itemId]
-      );
+      await db.query("UPDATE app.list_items SET paid_by = $1 WHERE id = $2", [
+        userId,
+        itemId,
+      ]);
       const userRes = await db.query(
         "SELECT first_name FROM app2.users WHERE id = $1",
-        [userId]
+        [userId],
       );
       const userName = userRes.rows[0]?.first_name || "User";
-      
-      io.to(listId).emit("item_paid_status", { 
-        itemId, 
-        paidBy: userId, 
-        paidByName: userName 
+
+      io.to(listId).emit("item_paid_status", {
+        itemId,
+        paidBy: userId,
+        paidByName: userName,
       });
     } catch (err) {
       console.error("Error marking paid:", err);
@@ -1590,27 +1759,12 @@ io.on("connection", (socket) => {
   socket.on("unmark_paid", async (data) => {
     const { itemId, listId } = data;
     try {
-      await db.query(
-        "UPDATE app.list_items SET paid_by = NULL WHERE id = $1",
-        [itemId]
-      );
+      await db.query("UPDATE app.list_items SET paid_by = NULL WHERE id = $1", [
+        itemId,
+      ]);
       io.to(listId).emit("item_paid_status", { itemId, paidBy: null });
     } catch (err) {
       console.error("Error unmarking paid:", err);
-    }
-  });
-
-  // UPDATE NOTE
-  socket.on("update_note", async (data) => {
-    const { itemId, listId, note } = data;
-    try {
-      await db.query(
-        "UPDATE app.list_items SET note = $1 WHERE id = $2",
-        [note, itemId]
-      );
-      io.to(listId).emit("item_note_updated", { itemId, note });
-    } catch (err) {
-      console.error("Error updating note:", err);
     }
   });
 
@@ -1618,31 +1772,42 @@ io.on("connection", (socket) => {
   socket.on("add_comment", async (data) => {
     const { itemId, listId, userId, comment } = data;
     try {
-      const result = await db.query(
-        `INSERT INTO app2.item_comments (item_id, list_id, user_id, comment, created_at)
-         VALUES ($1, $2, $3, $4, NOW())
-         RETURNING id, created_at`,
-        [itemId, listId, userId, comment]
+      // Check if user already has a comment on this item
+      const existingComment = await db.query(
+        `SELECT id FROM app.list_item_comments WHERE item_id = $1 AND user_id = $2`,
+        [itemId, userId],
       );
-      
+
+      if (existingComment.rows.length > 0) {
+        console.log(`User ${userId} already has a comment on item ${itemId}`);
+        return;
+      }
+
+      const result = await db.query(
+        `INSERT INTO app.list_item_comments (item_id, user_id, comment, created_at)
+         VALUES ($1, $2, $3, NOW())
+         RETURNING id, created_at`,
+        [itemId, userId, comment],
+      );
+
       const userRes = await db.query(
         "SELECT first_name FROM app2.users WHERE id = $1",
-        [userId]
+        [userId],
       );
       const userName = userRes.rows[0]?.first_name || "User";
-      
+
       const newComment = {
         id: result.rows[0].id,
         item_id: itemId,
         user_id: userId,
         first_name: userName,
         comment: comment,
-        created_at: result.rows[0].created_at
+        created_at: result.rows[0].created_at,
       };
-      
-      io.to(listId).emit("receive_comment", { 
-        itemId, 
-        comment: newComment 
+
+      io.to(String(listId)).emit("receive_comment", {
+        itemId,
+        comment: newComment,
       });
     } catch (err) {
       console.error("Error adding comment:", err);
