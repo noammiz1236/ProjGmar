@@ -1313,6 +1313,152 @@ app.delete(
   },
 );
 
+// GET /api/templates — get user's templates
+app.get("/api/templates", authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT t.id, t.template_name, t.created_at,
+              COUNT(ti.id) AS item_count
+       FROM app.list_templates t
+       LEFT JOIN app.template_items ti ON ti.template_id = t.id
+       WHERE t.user_id = $1
+       GROUP BY t.id
+       ORDER BY t.created_at DESC`,
+      [req.userId]
+    );
+    return res.json({ templates: result.rows });
+  } catch (err) {
+    console.error("Error fetching templates:", err);
+    return res.status(500).json({ message: "Error fetching templates" });
+  }
+});
+
+// POST /api/templates — create template from list
+app.post("/api/templates", authenticateToken, async (req, res) => {
+  const { listId, templateName } = req.body;
+
+  if (!listId || !templateName) {
+    return res.status(400).json({ message: "listId and templateName required" });
+  }
+
+  try {
+    // Verify user is admin of the list
+    const memberCheck = await db.query(
+      "SELECT status FROM app.list_members WHERE list_id = $1 AND user_id = $2",
+      [listId, req.userId]
+    );
+
+    if (memberCheck.rows.length === 0 || memberCheck.rows[0].status !== "admin") {
+      return res.status(403).json({ message: "Only list admin can create templates" });
+    }
+
+    // Create template
+    const templateResult = await db.query(
+      "INSERT INTO app.list_templates (user_id, template_name, created_at) VALUES ($1, $2, NOW()) RETURNING id",
+      [req.userId, templateName]
+    );
+    const templateId = templateResult.rows[0].id;
+
+    // Copy items from list to template
+    const items = await db.query(
+      "SELECT itemName, quantity, note FROM app.list_items WHERE listId = $1 ORDER BY id",
+      [listId]
+    );
+
+    for (let i = 0; i < items.rows.length; i++) {
+      const item = items.rows[i];
+      await db.query(
+        `INSERT INTO app.template_items (template_id, item_name, quantity, note, sort_order)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [templateId, item.itemname, item.quantity || 1, item.note, i]
+      );
+    }
+
+    return res.json({ templateId, message: "Template created successfully" });
+  } catch (err) {
+    console.error("Error creating template:", err);
+    return res.status(500).json({ message: "Error creating template" });
+  }
+});
+
+// POST /api/templates/:id/apply — create list from template
+app.post("/api/templates/:id/apply", authenticateToken, async (req, res) => {
+  const templateId = req.params.id;
+  const { listName } = req.body;
+
+  try {
+    // Verify template belongs to user
+    const templateCheck = await db.query(
+      "SELECT id, template_name FROM app.list_templates WHERE id = $1 AND user_id = $2",
+      [templateId, req.userId]
+    );
+
+    if (templateCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Template not found" });
+    }
+
+    const template = templateCheck.rows[0];
+    const newListName = listName || template.template_name;
+
+    // Create new list
+    const listResult = await db.query(
+      "INSERT INTO app.list (list_name) VALUES ($1) RETURNING id",
+      [newListName]
+    );
+    const newListId = listResult.rows[0].id;
+
+    // Add user as admin
+    await db.query(
+      "INSERT INTO app.list_members (list_id, user_id, status) VALUES ($1, $2, 'admin')",
+      [newListId, req.userId]
+    );
+
+    // Copy template items to new list
+    const items = await db.query(
+      "SELECT item_name, quantity, note FROM app.template_items WHERE template_id = $1 ORDER BY sort_order",
+      [templateId]
+    );
+
+    for (const item of items.rows) {
+      await db.query(
+        `INSERT INTO app.list_items (listId, itemName, quantity, note, addby, addat, updatedat)
+         VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
+        [newListId, item.item_name, item.quantity || 1, item.note, req.userId]
+      );
+    }
+
+    return res.json({ listId: newListId, message: "List created from template" });
+  } catch (err) {
+    console.error("Error applying template:", err);
+    return res.status(500).json({ message: "Error creating list from template" });
+  }
+});
+
+// DELETE /api/templates/:id — delete template
+app.delete("/api/templates/:id", authenticateToken, async (req, res) => {
+  const templateId = req.params.id;
+
+  try {
+    // Verify template belongs to user
+    const templateCheck = await db.query(
+      "SELECT id FROM app.list_templates WHERE id = $1 AND user_id = $2",
+      [templateId, req.userId]
+    );
+
+    if (templateCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Template not found" });
+    }
+
+    // Delete template (CASCADE will delete template_items)
+    await db.query("DELETE FROM app.list_templates WHERE id = $1", [templateId]);
+
+    return res.json({ success: true, message: "Template deleted" });
+  } catch (err) {
+    console.error("Error deleting template:", err);
+    return res.status(500).json({ message: "Error deleting template" });
+  }
+});
+
 // GET /api/kid-requests/pending — get pending requests for parent
 app.get("/api/kid-requests/pending", authenticateToken, async (req, res) => {
   try {
