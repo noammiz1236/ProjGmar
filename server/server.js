@@ -128,25 +128,52 @@ app.get("/api/search", async (req, res) => {
   const search = req.query.q;
   if (!search) return res.json([]);
   try {
-    const searchTerm = `%${search}%`;
     const reply = await db.query(
       `SELECT DISTINCT ON (i.id)
-       i.*,
+       i.id as item_id,
+       i.name as item_name,
+       i.barcode,
+       i.item_code,
        p.price,
-       c.name AS chain_name
-FROM app.items i
-LEFT JOIN app.prices p   ON p.item_id = i.id
-LEFT JOIN app.branches b ON b.id = p.branch_id
-LEFT JOIN app.chains c   ON c.id = b.chain_id
-WHERE i.name ILIKE $1
-
-LIMIT 10;
-`,
-      [searchTerm],
+       c.id as chain_id,
+       c.name as chain_name,
+       b.branch_name
+       FROM app.items i
+       LEFT JOIN app.prices p ON p.item_id = i.id
+       LEFT JOIN app.branches b ON b.id = p.branch_id
+       LEFT JOIN app.chains c ON c.id = b.chain_id
+       WHERE i.name ILIKE $1
+       ORDER BY i.id, p.price DESC NULLS LAST`,
+      [search],
     );
+    if (reply.rows.length > 0) {
+    } else {
+      const searchTerm = `${search}%`;
+      console.log("Search term with wildcards:", searchTerm);
+
+      reply = await db.query(
+        `SELECT DISTINCT ON (i.id)
+       i.id as item_id,
+       i.name as item_name,
+       i.barcode,
+       i.item_code,
+       p.price,
+       c.id as chain_id,
+       c.name as chain_name,
+       b.branch_name
+       FROM app.items i
+       LEFT JOIN app.prices p ON p.item_id = i.id
+       LEFT JOIN app.branches b ON b.id = p.branch_id
+       LEFT JOIN app.chains c ON c.id = b.chain_id
+       WHERE i.name ILIKE $1
+       ORDER BY i.id, p.price DESC NULLS LAST
+       LIMIT 15`,
+        [searchTerm],
+      );
+    }
     res.json(reply.rows);
   } catch (e) {
-    console.error(e);
+    console.error("Search error:", e.message);
     return res.status(500).json([]);
   }
 });
@@ -321,7 +348,7 @@ app.get("/api/verify-email", async (req, res) => {
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      sameSite: "lax",
       path: "/",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 ימים במילישניות
     });
@@ -346,18 +373,30 @@ app.get("/api/verify-email", async (req, res) => {
 
 // LOGIN
 app.post("/api/login", async (req, res) => {
-  const { email, password } = req.body;
+  const { email, username, password } = req.body;
 
-  // בדיקות בסיסיות
-  if (!email || !password) {
-    return res.status(400).json({ message: "Email and password are required" });
+  // בדיקות בסיסיות - need either email or username
+  if ((!email && !username) || !password) {
+    return res
+      .status(400)
+      .json({ message: "Email/username and password are required" });
   }
 
   try {
-    const results = await db.query(
-      "SELECT * FROM app2.users WHERE email = $1",
-      [email],
-    );
+    // Check if logging in with email or username
+    let results;
+    if (email) {
+      // Parent login with email
+      results = await db.query("SELECT * FROM app2.users WHERE email = $1", [
+        email,
+      ]);
+    } else {
+      // Child login with username
+      results = await db.query("SELECT * FROM app2.users WHERE username = $1", [
+        username,
+      ]);
+    }
+
     if (results.rows.length === 0)
       return res.status(400).json({ message: "Invalid credentials" });
 
@@ -371,13 +410,18 @@ app.post("/api/login", async (req, res) => {
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      path: "/api/refresh",
+      sameSite: "lax",
+      path: "/",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
     return res.status(200).json({
-      user: { id: user.id, first_name: user.first_name, email: user.email },
+      user: {
+        id: user.id,
+        first_name: user.first_name,
+        email: user.email,
+        username: user.username,
+      },
       accessToken,
     });
   } catch (err) {
@@ -388,7 +432,8 @@ app.post("/api/login", async (req, res) => {
 
 // REFRESH
 app.post("/api/refresh", async (req, res) => {
-  const incomingToken = req.cookies.refreshToken;
+  // Accept refresh token from cookie (web) OR body (mobile app)
+  const incomingToken = req.cookies.refreshToken || req.body.refreshToken;
   if (!incomingToken) return res.status(401).json({ message: "Unauthorized" });
 
   try {
@@ -421,16 +466,17 @@ app.post("/api/refresh", async (req, res) => {
     // יצירת tokens חדשים
     const { accessToken, refreshToken } = await generateTokens(payload.sub);
 
-    // Cookie
+    // Cookie (for web)
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      sameSite: "lax",
       path: "/",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
 
-    return res.json({ accessToken });
+    // Return both tokens (mobile app needs refreshToken in body)
+    return res.json({ accessToken, refreshToken });
   } catch (err) {
     return res.status(403).json({ message: "Invalid refresh token" });
   }
@@ -440,18 +486,122 @@ app.post("/api/refresh", async (req, res) => {
 app.get("/api/me", authenticateToken, async (req, res) => {
   try {
     const results = await db.query(
-      "SELECT id, first_name, last_name, email FROM app2.users WHERE id = $1",
+      "SELECT id, first_name, last_name, email, username, parent_id FROM app2.users WHERE id = $1",
       [req.userId],
     );
 
     if (results.rows.length === 0) return res.status(404).json({ user: null });
 
-    return res.status(200).json({ user: results.rows[0] }); // id, first_name, last_name, email returns all user data
+    return res.status(200).json({ user: results.rows[0] });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: "Server error" });
   }
 });
+
+// POST /api/family/create-child - create child account
+app.post("/api/family/create-child", authenticateToken, async (req, res) => {
+  const { firstName, username, password } = req.body;
+
+  try {
+    // Validate inputs
+    if (!firstName || !username || !password) {
+      return res.status(400).json({ message: "All fields are required" });
+    }
+    if (password.length < 6) {
+      return res
+        .status(400)
+        .json({ message: "Password must be at least 6 characters" });
+    }
+
+    // Check if requesting user is a child account (prevent grandchildren)
+    const requestingUser = await db.query(
+      "SELECT parent_id FROM app2.users WHERE id = $1",
+      [req.userId],
+    );
+    if (requestingUser.rows.length === 0) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    if (requestingUser.rows[0].parent_id !== null) {
+      return res
+        .status(403)
+        .json({ message: "Child accounts cannot create other children" });
+    }
+
+    // Check if username already exists
+    const existing = await db.query(
+      "SELECT id FROM app2.users WHERE username = $1",
+      [username],
+    );
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ message: "Username already taken" });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // Create child account
+    const result = await db.query(
+      `INSERT INTO app2.users (first_name, username, password_hash, parent_id, email)
+       VALUES ($1, $2, $3, $4, NULL)
+       RETURNING id, first_name, username`,
+      [firstName, username, hashedPassword, req.userId],
+    );
+
+    return res.status(201).json({ child: result.rows[0] });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Error creating child account" });
+  }
+});
+
+// GET /api/family/children - get parent's children
+app.get("/api/family/children", authenticateToken, async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT id, first_name, username, created_at
+       FROM app2.users
+       WHERE parent_id = $1
+       ORDER BY created_at DESC`,
+      [req.userId],
+    );
+    return res.json({ children: rows });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Error fetching children" });
+  }
+});
+
+// DELETE /api/family/delete-child/:childId - delete child account
+app.delete(
+  "/api/family/delete-child/:childId",
+  authenticateToken,
+  async (req, res) => {
+    const childId = req.params.childId;
+
+    try {
+      // Verify the child belongs to this parent
+      const child = await db.query(
+        "SELECT id FROM app2.users WHERE id = $1 AND parent_id = $2",
+        [childId, req.userId],
+      );
+
+      if (child.rows.length === 0) {
+        return res
+          .status(403)
+          .json({ message: "Unauthorized or child not found" });
+      }
+
+      // Delete the child account (cascade will handle related data)
+      await db.query("DELETE FROM app2.users WHERE id = $1", [childId]);
+
+      return res.json({ message: "Child account deleted" });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ message: "Error deleting child account" });
+    }
+  },
+);
 
 // LOGOUT
 app.post("/api/logout", async (req, res) => {
@@ -469,7 +619,7 @@ app.post("/api/logout", async (req, res) => {
       console.log(e);
     }
   }
-  res.clearCookie("refreshToken", { path: "/api/refresh" });
+  res.clearCookie("refreshToken", { path: "/" });
   return res.status(200).json({ message: "Logged out" });
 });
 
@@ -488,8 +638,8 @@ app.post("/api/logout-all", authenticateToken, async (req, res) => {
     res.clearCookie("refreshToken", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      path: "/api/refresh",
+      sameSite: "lax",
+      path: "/",
     });
 
     return res.status(200).json({ message: "Logged out from all devices" });
@@ -498,37 +648,6 @@ app.post("/api/logout-all", authenticateToken, async (req, res) => {
     return res
       .status(500)
       .json({ message: "Error logging out from all devices" });
-  }
-});
-
-// STORE (דוגמה לאבטחת ה-Route במידת הצורך - הוסף authenticateToken אם תרצה)
-app.get("/api/store", async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 12;
-    const offset = parseInt(req.query.offset) || 0;
-
-    const results = await db.query(
-      `SELECT DISTINCT ON (i.id, c.id)
-            i.id AS item_id, i.name AS item_name, p.price AS price,
-            c.id AS chain_id, c.name AS chain_name
-         FROM app.items i
-         JOIN app.prices p ON i.id = p.item_id
-         JOIN app.branches b ON p.branch_id = b.id
-         JOIN app.chains c ON b.chain_id = c.id
-         ORDER BY i.id, c.id, p.price
-         LIMIT $1 OFFSET $2`,
-      [limit, offset],
-    );
-
-    const products = results.rows;
-    return res.status(200).json({
-      products,
-      hasMore: products.length === limit,
-      nextOffset: offset + products.length,
-    });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ message: "Error fetching products" });
   }
 });
 
@@ -749,9 +868,10 @@ app.get("/api/lists/:id/items", authenticateToken, async (req, res) => {
       return res.status(404).json({ message: "List not found" });
 
     const itemsRes = await db.query(
-      `SELECT li.*, u.first_name AS paid_by_name
+      `SELECT li.*, u.first_name AS paid_by_name, u2.first_name AS note_by_name
        FROM app.list_items li
        LEFT JOIN app2.users u ON li.paid_by = u.id
+       LEFT JOIN app2.users u2 ON li.note_by = u2.id
        WHERE li.listid = $1
        ORDER BY li.addat DESC`,
       [listId],
@@ -774,6 +894,72 @@ app.get("/api/lists/:id/items", authenticateToken, async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: "Error fetching list details" });
+  }
+});
+
+// DELETE /api/lists/:id — delete a list (admin only)
+app.delete("/api/lists/:id", authenticateToken, async (req, res) => {
+  const listId = req.params.id;
+
+  try {
+    // Check if user is admin of this list
+    const membership = await db.query(
+      "SELECT status FROM app.list_members WHERE list_id = $1 AND user_id = $2",
+      [listId, req.userId],
+    );
+
+    if (membership.rows.length === 0) {
+      return res.status(403).json({ message: "Not a member of this list" });
+    }
+
+    if (membership.rows[0].status !== "admin") {
+      return res
+        .status(403)
+        .json({ message: "Only admin can delete the list" });
+    }
+
+    // Delete the list (CASCADE will delete list_items and list_members)
+    await db.query("DELETE FROM app.list WHERE id = $1", [listId]);
+
+    return res.json({ success: true, message: "List deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting list:", err);
+    return res.status(500).json({ message: "Error deleting list" });
+  }
+});
+
+// POST /api/lists/:id/leave — leave a list (members only, not admin)
+app.post("/api/lists/:id/leave", authenticateToken, async (req, res) => {
+  const listId = req.params.id;
+
+  try {
+    // Check if user is a member of this list
+    const membership = await db.query(
+      "SELECT status FROM app.list_members WHERE list_id = $1 AND user_id = $2",
+      [listId, req.userId],
+    );
+
+    if (membership.rows.length === 0) {
+      return res.status(403).json({ message: "Not a member of this list" });
+    }
+
+    if (membership.rows[0].status === "admin") {
+      return res.status(403).json({
+        message:
+          "Admin cannot leave the list. Delete it or transfer admin role first.",
+      });
+    }
+
+    // Remove user from list
+    await db.query(
+      "DELETE FROM app.list_members WHERE list_id = $1 AND user_id = $2",
+      [listId, req.userId],
+    );
+
+    return res.json({ success: true, message: "Left list successfully" });
+  } catch (err) {
+    console.error("Error leaving list:", err);
+    return res.status(500).json({ message: "Error leaving list" });
   }
 });
 
@@ -903,6 +1089,162 @@ app.post("/api/lists/:id/invite", authenticateToken, async (req, res) => {
   }
 });
 
+// POST /api/lists/:id/items — add item to list
+app.post("/api/lists/:id/items", authenticateToken, async (req, res) => {
+  const listId = req.params.id;
+  console.log("=== ADD ITEM DEBUG ===");
+  console.log("Request body:", JSON.stringify(req.body, null, 2));
+  const { itemName, price, storeName, quantity, productId } = req.body;
+
+  if (!itemName || itemName.trim() === "") {
+    return res.status(400).json({ message: "Item name is required" });
+  }
+
+  try {
+    // Check user has access to this list
+    const membership = await db.query(
+      "SELECT id FROM app.list_members WHERE list_id = $1 AND user_id = $2",
+      [listId, req.userId],
+    );
+    if (membership.rows.length === 0) {
+      return res.status(403).json({ message: "Not a member of this list" });
+    }
+
+    // Insert item (Note: table uses camelCase for listId, itemName, storeName!)
+    const result = await db.query(
+      `INSERT INTO app.list_items (listId, itemName, price, storeName, quantity, addby, addat, updatedat, product_id)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), $7)
+       RETURNING *`,
+      [
+        listId,
+        itemName,
+        price || null,
+        storeName || null,
+        quantity || 1,
+        req.userId,
+        productId || null,
+      ],
+    );
+
+    const newItem = result.rows[0];
+
+    // Emit to socket.io room for real-time updates
+    io.to(String(listId)).emit("receive_item", newItem);
+
+    return res.status(201).json({ item: newItem });
+  } catch (err) {
+    console.error("Error adding item to list:", err.message);
+    console.error("Stack:", err.stack);
+    return res
+      .status(500)
+      .json({ message: "Error adding item", error: err.message });
+  }
+});
+
+// GET /api/family/children — get all children for parent
+app.get("/api/family/children", authenticateToken, async (req, res) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT id, first_name, username, created_at
+       FROM app2.users
+       WHERE parent_id = $1
+       ORDER BY created_at DESC`,
+      [req.userId],
+    );
+    return res.json({ children: rows });
+  } catch (err) {
+    console.error("Error fetching children:", err);
+    return res.status(500).json({ message: "Error fetching children" });
+  }
+});
+
+// POST /api/family/create-child — create child account
+app.post("/api/family/create-child", authenticateToken, async (req, res) => {
+  const { firstName, username, password } = req.body;
+
+  if (!firstName || !username || !password) {
+    return res.status(400).json({ message: "All fields are required" });
+  }
+
+  if (password.length < 4) {
+    return res
+      .status(400)
+      .json({ message: "Password must be at least 4 characters" });
+  }
+
+  try {
+    // Prevent children from creating other children
+    const requestingUser = await db.query(
+      "SELECT parent_id FROM app2.users WHERE id = $1",
+      [req.userId],
+    );
+
+    if (requestingUser.rows[0].parent_id !== null) {
+      return res
+        .status(403)
+        .json({ message: "Child accounts cannot create other children" });
+    }
+
+    const existingUser = await db.query(
+      "SELECT id FROM app2.users WHERE username = $1",
+      [username],
+    );
+
+    if (existingUser.rows.length > 0) {
+      return res.status(400).json({ message: "Username already taken" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    const result = await db.query(
+      `INSERT INTO app2.users (first_name, username, password, parent_id, created_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       RETURNING id, first_name, username`,
+      [firstName, username, hashedPassword, req.userId],
+    );
+
+    const child = result.rows[0];
+
+    return res.status(201).json({
+      message: "Child account created successfully",
+      child: child,
+    });
+  } catch (err) {
+    console.error("Error creating child account:", err);
+    return res.status(500).json({ message: "Error creating child account" });
+  }
+});
+
+// DELETE /api/family/delete-child/:childId — delete child account
+app.delete(
+  "/api/family/delete-child/:childId",
+  authenticateToken,
+  async (req, res) => {
+    const { childId } = req.params;
+
+    try {
+      const child = await db.query(
+        "SELECT id FROM app2.users WHERE id = $1 AND parent_id = $2",
+        [childId, req.userId],
+      );
+
+      if (child.rows.length === 0) {
+        return res.status(403).json({ message: "Not your child account" });
+      }
+
+      await db.query("DELETE FROM app2.users WHERE id = $1", [childId]);
+
+      return res.json({
+        success: true,
+        message: "Child account deleted successfully",
+      });
+    } catch (err) {
+      console.error("Error deleting child account:", err);
+      return res.status(500).json({ message: "Error deleting child account" });
+    }
+  },
+);
+
 // GET /api/lists/:id/children — get parent's children with membership status
 app.get("/api/lists/:id/children", authenticateToken, async (req, res) => {
   const listId = req.params.id;
@@ -976,23 +1318,245 @@ app.delete(
   },
 );
 
+// GET /api/templates — get user's templates
+app.get("/api/templates", authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT t.id, t.template_name, t.created_at,
+              COUNT(ti.id) AS item_count
+       FROM app.list_templates t
+       LEFT JOIN app.template_items ti ON ti.template_id = t.id
+       WHERE t.user_id = $1
+       GROUP BY t.id
+       ORDER BY t.created_at DESC`,
+      [req.userId],
+    );
+    return res.json({ templates: result.rows });
+  } catch (err) {
+    console.error("Error fetching templates:", err);
+    return res.status(500).json({ message: "Error fetching templates" });
+  }
+});
+
+// POST /api/templates — create template from list
+app.post("/api/templates", authenticateToken, async (req, res) => {
+  const { listId, templateName } = req.body;
+
+  if (!listId || !templateName) {
+    return res
+      .status(400)
+      .json({ message: "listId and templateName required" });
+  }
+
+  try {
+    // Verify user is admin of the list
+    const memberCheck = await db.query(
+      "SELECT status FROM app.list_members WHERE list_id = $1 AND user_id = $2",
+      [listId, req.userId],
+    );
+
+    if (
+      memberCheck.rows.length === 0 ||
+      memberCheck.rows[0].status !== "admin"
+    ) {
+      return res
+        .status(403)
+        .json({ message: "Only list admin can create templates" });
+    }
+
+    // Create template
+    const templateResult = await db.query(
+      "INSERT INTO app.list_templates (user_id, template_name, created_at) VALUES ($1, $2, NOW()) RETURNING id",
+      [req.userId, templateName],
+    );
+    const templateId = templateResult.rows[0].id;
+
+    // Copy items from list to template
+    const items = await db.query(
+      "SELECT itemName, quantity, note FROM app.list_items WHERE listId = $1 ORDER BY id",
+      [listId],
+    );
+
+    for (let i = 0; i < items.rows.length; i++) {
+      const item = items.rows[i];
+      await db.query(
+        `INSERT INTO app.template_items (template_id, item_name, quantity, note, sort_order)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [templateId, item.itemname, item.quantity || 1, item.note, i],
+      );
+    }
+
+    return res.json({ templateId, message: "Template created successfully" });
+  } catch (err) {
+    console.error("Error creating template:", err);
+    return res.status(500).json({ message: "Error creating template" });
+  }
+});
+
+// POST /api/templates/:id/apply — create list from template
+app.post("/api/templates/:id/apply", authenticateToken, async (req, res) => {
+  const templateId = req.params.id;
+  const { listName } = req.body;
+
+  try {
+    // Verify template belongs to user
+    const templateCheck = await db.query(
+      "SELECT id, template_name FROM app.list_templates WHERE id = $1 AND user_id = $2",
+      [templateId, req.userId],
+    );
+
+    if (templateCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Template not found" });
+    }
+
+    const template = templateCheck.rows[0];
+    const newListName = listName || template.template_name;
+
+    // Create new list
+    const listResult = await db.query(
+      "INSERT INTO app.list (list_name) VALUES ($1) RETURNING id",
+      [newListName],
+    );
+    const newListId = listResult.rows[0].id;
+
+    // Add user as admin
+    await db.query(
+      "INSERT INTO app.list_members (list_id, user_id, status) VALUES ($1, $2, 'admin')",
+      [newListId, req.userId],
+    );
+
+    // Copy template items to new list
+    const items = await db.query(
+      "SELECT item_name, quantity, note FROM app.template_items WHERE template_id = $1 ORDER BY sort_order",
+      [templateId],
+    );
+
+    for (const item of items.rows) {
+      await db.query(
+        `INSERT INTO app.list_items (listId, itemName, quantity, note, addby, addat, updatedat)
+         VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
+        [newListId, item.item_name, item.quantity || 1, item.note, req.userId],
+      );
+    }
+
+    return res.json({
+      listId: newListId,
+      message: "List created from template",
+    });
+  } catch (err) {
+    console.error("Error applying template:", err);
+    return res
+      .status(500)
+      .json({ message: "Error creating list from template" });
+  }
+});
+
+// DELETE /api/templates/:id — delete template
+app.delete("/api/templates/:id", authenticateToken, async (req, res) => {
+  const templateId = req.params.id;
+
+  try {
+    // Verify template belongs to user
+    const templateCheck = await db.query(
+      "SELECT id FROM app.list_templates WHERE id = $1 AND user_id = $2",
+      [templateId, req.userId],
+    );
+
+    if (templateCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Template not found" });
+    }
+
+    // Delete template (CASCADE will delete template_items)
+    await db.query("DELETE FROM app.list_templates WHERE id = $1", [
+      templateId,
+    ]);
+
+    return res.json({ success: true, message: "Template deleted" });
+  } catch (err) {
+    console.error("Error deleting template:", err);
+    return res.status(500).json({ message: "Error deleting template" });
+  }
+});
+
+// GET /api/kid-requests/pending — get pending requests for parent
+app.get("/api/kid-requests/pending", authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT
+        kr.id,
+        kr.item_name,
+        kr.price,
+        kr.quantity,
+        kr.product_id,
+        kr.created_at,
+        u.first_name as child_first_name,
+        l.list_name
+       FROM app2.kid_requests kr
+       JOIN app2.users u ON u.id = kr.child_id
+       JOIN app.list l ON l.id = kr.list_id
+       WHERE kr.parent_id = $1 AND kr.status = 'pending'
+       ORDER BY kr.created_at DESC`,
+      [req.userId],
+    );
+    return res.json({ requests: result.rows });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Error fetching requests" });
+  }
+});
+
+// GET /api/kid-requests/my — get child's own request history
+app.get("/api/kid-requests/my", authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT
+        kr.id,
+        kr.item_name,
+        kr.price,
+        kr.quantity,
+        kr.status,
+        kr.created_at,
+        kr.product_id,
+        l.list_name
+       FROM app2.kid_requests kr
+       LEFT JOIN app.list l ON l.id = kr.list_id
+       WHERE kr.child_id = $1
+       ORDER BY kr.created_at DESC`,
+      [req.userId],
+    );
+    return res.json({ requests: result.rows });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Error fetching requests" });
+  }
+});
+
 // POST /api/kid-requests — child requests to add item
 app.post("/api/kid-requests", authenticateToken, async (req, res) => {
   const { listId, itemName, price, storeName, quantity, productId } = req.body;
   try {
-    // Get the child's parent
+    // Get the child's parent and child info
     const userRes = await db.query(
-      "SELECT parent_id FROM app2.users WHERE id = $1",
+      "SELECT parent_id, first_name FROM app2.users WHERE id = $1",
       [req.userId],
     );
     if (userRes.rows.length === 0 || !userRes.rows[0].parent_id) {
       return res.status(403).json({ message: "Not a child account" });
     }
     const parentId = userRes.rows[0].parent_id;
+    const childName = userRes.rows[0].first_name;
 
-    await db.query(
+    // Get list name
+    const listRes = await db.query(
+      "SELECT list_name FROM app.list WHERE id = $1",
+      [listId],
+    );
+    const listName = listRes.rows[0]?.list_name || "רשימה";
+
+    const result = await db.query(
       `INSERT INTO app2.kid_requests (child_id, parent_id, list_id, item_name, price, store_name, quantity, product_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id`,
       [
         req.userId,
         parentId,
@@ -1004,6 +1568,24 @@ app.post("/api/kid-requests", authenticateToken, async (req, res) => {
         productId || null,
       ],
     );
+
+    // Emit real-time notification to parent
+    const requestId = result.rows[0].id;
+    io.to(`user_${parentId}`).emit("new_kid_request", {
+      id: requestId,
+      requestId: requestId,
+      childName: childName,
+      child_first_name: childName,
+      itemName: itemName,
+      item_name: itemName,
+      listName: listName,
+      list_name: listName,
+      quantity: quantity || 1,
+      price: price,
+      productId: productId,
+      product_id: productId,
+    });
+
     return res.status(201).json({ message: "Request sent" });
   } catch (err) {
     console.error(err);
@@ -1011,8 +1593,110 @@ app.post("/api/kid-requests", authenticateToken, async (req, res) => {
   }
 });
 
+// POST /api/kid-requests/:id/resolve — approve or reject child request
+app.post(
+  "/api/kid-requests/:id/resolve",
+  authenticateToken,
+  async (req, res) => {
+    const requestId = req.params.id;
+    const { action } = req.body; // "approve" or "reject"
+
+    if (action !== "approve" && action !== "reject") {
+      return res.status(400).json({ message: "Invalid action" });
+    }
+
+    try {
+      // Get the request and verify it belongs to this parent
+      const requestResult = await db.query(
+        `SELECT kr.*, u.first_name as child_first_name
+       FROM app2.kid_requests kr
+       JOIN app2.users u ON u.id = kr.child_id
+       WHERE kr.id = $1 AND kr.parent_id = $2`,
+        [requestId, req.userId],
+      );
+
+      if (requestResult.rows.length === 0) {
+        return res.status(403).json({ message: "Not your child's request" });
+      }
+
+      const request = requestResult.rows[0];
+      const newStatus = action === "approve" ? "approved" : "rejected";
+
+      // Update request status
+      await db.query("UPDATE app2.kid_requests SET status = $1 WHERE id = $2", [
+        newStatus,
+        requestId,
+      ]);
+
+      // If approved, add the item to the list
+      if (action === "approve") {
+        const itemResult = await db.query(
+          `INSERT INTO app.list_items (listId, itemName, price, storeName, quantity, addby, addat, updatedat, product_id)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), $7)
+         RETURNING *`,
+          [
+            request.list_id,
+            request.item_name,
+            request.price || null,
+            request.store_name || null,
+            request.quantity || 1,
+            request.child_id, // Item added by the child
+            request.product_id || null,
+          ],
+        );
+
+        // Emit to list room so all members see the new item
+        io.to(String(request.list_id)).emit("receive_item", itemResult.rows[0]);
+      }
+
+      // Notify the child that their request was resolved
+      io.to(`user_${request.child_id}`).emit("request_resolved", {
+        requestId: requestId,
+        status: newStatus,
+      });
+
+      return res.json({
+        success: true,
+        message: action === "approve" ? "Request approved" : "Request rejected",
+      });
+    } catch (err) {
+      console.error("Error resolving request:", err);
+      return res.status(500).json({ message: "Error resolving request" });
+    }
+  },
+);
+
+// GET comments for an item
+app.get(
+  "/api/lists/:listId/items/:itemId/comments",
+  authenticateToken,
+  async (req, res) => {
+    const { listId, itemId } = req.params;
+
+    try {
+      const result = await db.query(
+        `SELECT c.id, c.item_id, c.user_id, c.comment, c.created_at, u.first_name
+       FROM app.list_item_comments c
+       JOIN app2.users u ON c.user_id = u.id
+       WHERE c.item_id = $1
+       ORDER BY c.created_at ASC`,
+        [itemId],
+      );
+
+      res.json({ comments: result.rows });
+    } catch (err) {
+      console.error("Error fetching comments:", err);
+      res.status(500).json({ message: "Error fetching comments" });
+    }
+  },
+);
+
 // Socket.io handlers
 io.on("connection", (socket) => {
+  socket.on("register_user", (userId) => {
+    socket.join(`user_${userId}`);
+    console.log(`משתמש ${userId} נרשם לחדר האישי שלו לקבלת התראות`);
+  });
   socket.on("join_list", (listId) => {
     socket.join(listId);
     console.log(`משתמש הצטרף לרשימה מספר: ${listId}`);
@@ -1027,10 +1711,11 @@ io.on("connection", (socket) => {
       addby,
       addat,
       updatedat,
+      productId,
     } = data;
     try {
-      const query = `insert into app.list_items (listId, itemName, price, storeName,quantity,addby,addat,updatedat)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`;
+      const query = `INSERT INTO app.list_items (listId, itemName, price, storeName, quantity, addby, addat, updatedat, product_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
 
       const values = [
         listId,
@@ -1041,13 +1726,15 @@ io.on("connection", (socket) => {
         addby,
         addat,
         updatedat,
+        productId || null,
       ];
       const result = await db.query(query, values);
       const newItem = result.rows[0];
 
-      io.to(listId).emit("receive_item", newItem);
+      io.to(String(listId)).emit("receive_item", newItem);
     } catch (e) {
       console.error("שגיאה בשמירה ל-DB:", e);
+      console.error("Error details:", e.message);
     }
   });
   socket.on("toggle_item", async (data) => {
@@ -1057,16 +1744,108 @@ io.on("connection", (socket) => {
         "UPDATE app.list_items SET is_checked = $1 WHERE id = $2",
         [isChecked, itemId],
       );
-      io.to(listId).emit("item_status_changed", { itemId, isChecked });
+      io.to(String(listId)).emit("item_status_changed", { itemId, isChecked });
     } catch (err) {
       console.error(err);
     }
   });
+
+  socket.on("delete_item", async (data) => {
+    const { itemId, listId } = data;
+    try {
+      await db.query("DELETE FROM app.list_items WHERE id = $1", [itemId]);
+      io.to(String(listId)).emit("item_deleted", { itemId });
+    } catch (err) {
+      console.error("Error deleting item:", err);
+    }
+  });
+
+  socket.on("mark_paid", async (data) => {
+    const { itemId, listId, userId } = data;
+    try {
+      const result = await db.query(
+        "UPDATE app.list_items SET paid_by = $1, paid_at = NOW() WHERE id = $2 RETURNING paid_at",
+        [userId, itemId],
+      );
+      const paid_at = result.rows[0]?.paid_at;
+
+      // Get user name
+      const userResult = await db.query(
+        "SELECT first_name FROM app2.users WHERE id = $1",
+        [userId],
+      );
+      const paid_by_name = userResult.rows[0]?.first_name;
+
+      io.to(String(listId)).emit("item_paid", {
+        itemId,
+        paid_by: userId,
+        paid_by_name,
+        paid_at,
+      });
+    } catch (err) {
+      console.error("Error marking paid:", err);
+    }
+  });
+
+  socket.on("unmark_paid", async (data) => {
+    const { itemId, listId } = data;
+    try {
+      await db.query(
+        "UPDATE app.list_items SET paid_by = NULL, paid_at = NULL WHERE id = $1",
+        [itemId],
+      );
+      io.to(String(listId)).emit("item_unpaid", { itemId });
+    } catch (err) {
+      console.error("Error unmarking paid:", err);
+    }
+  });
+
+  socket.on("update_note", async (data) => {
+    const { itemId, listId, note, userId } = data;
+    try {
+      await db.query(
+        "UPDATE app.list_items SET note = $1, note_by = $2 WHERE id = $3",
+        [note || null, userId, itemId],
+      );
+
+      // Get user name
+      const userResult = await db.query(
+        "SELECT first_name FROM app2.users WHERE id = $1",
+        [userId],
+      );
+      const note_by_name = userResult.rows[0]?.first_name;
+
+      io.to(String(listId)).emit("note_updated", {
+        itemId,
+        note,
+        note_by: userId,
+        note_by_name,
+      });
+    } catch (err) {
+      console.error("Error updating note:", err);
+    }
+  });
+
   socket.on("create_list", async (list, callback) => {
     const { list_name, userId } = list;
     if (!list_name || !userId)
       return callback({ success: false, error: `missing data` });
     try {
+      // Check if user is a child account (prevent children from creating lists)
+      const userCheck = await db.query(
+        "SELECT parent_id FROM app2.users WHERE id = $1",
+        [userId],
+      );
+      if (userCheck.rows.length === 0) {
+        return callback({ success: false, error: "User not found" });
+      }
+      if (userCheck.rows[0].parent_id !== null) {
+        return callback({
+          success: false,
+          error: "Child accounts cannot create lists",
+        });
+      }
+
       const listRes = await db.query(
         `INSERT INTO app.list (list_name) VALUES ($1) RETURNING id`,
         [list_name],
@@ -1104,6 +1883,100 @@ io.on("connection", (socket) => {
         callback({ success: false, msg: `db eror` });
       }
     });
+  });
+
+  // DELETE ITEM
+  socket.on("delete_item", async (data) => {
+    const { itemId, listId } = data;
+    try {
+      await db.query("DELETE FROM app.list_items WHERE id = $1", [itemId]);
+      io.to(listId).emit("item_deleted", { itemId });
+    } catch (err) {
+      console.error("Error deleting item:", err);
+    }
+  });
+
+  // MARK PAID
+  socket.on("mark_paid", async (data) => {
+    const { itemId, listId, userId } = data;
+    try {
+      await db.query("UPDATE app.list_items SET paid_by = $1 WHERE id = $2", [
+        userId,
+        itemId,
+      ]);
+      const userRes = await db.query(
+        "SELECT first_name FROM app2.users WHERE id = $1",
+        [userId],
+      );
+      const userName = userRes.rows[0]?.first_name || "User";
+
+      io.to(listId).emit("item_paid_status", {
+        itemId,
+        paidBy: userId,
+        paidByName: userName,
+      });
+    } catch (err) {
+      console.error("Error marking paid:", err);
+    }
+  });
+
+  // UNMARK PAID
+  socket.on("unmark_paid", async (data) => {
+    const { itemId, listId } = data;
+    try {
+      await db.query("UPDATE app.list_items SET paid_by = NULL WHERE id = $1", [
+        itemId,
+      ]);
+      io.to(listId).emit("item_paid_status", { itemId, paidBy: null });
+    } catch (err) {
+      console.error("Error unmarking paid:", err);
+    }
+  });
+
+  // ADD COMMENT
+  socket.on("add_comment", async (data) => {
+    const { itemId, listId, userId, comment } = data;
+    try {
+      // Check if user already has a comment on this item
+      const existingComment = await db.query(
+        `SELECT id FROM app.list_item_comments WHERE item_id = $1 AND user_id = $2`,
+        [itemId, userId],
+      );
+
+      if (existingComment.rows.length > 0) {
+        console.log(`User ${userId} already has a comment on item ${itemId}`);
+        return;
+      }
+
+      const result = await db.query(
+        `INSERT INTO app.list_item_comments (item_id, user_id, comment, created_at)
+         VALUES ($1, $2, $3, NOW())
+         RETURNING id, created_at`,
+        [itemId, userId, comment],
+      );
+
+      const userRes = await db.query(
+        "SELECT first_name FROM app2.users WHERE id = $1",
+        [userId],
+      );
+      const userName = userRes.rows[0]?.first_name || "User";
+
+      const newComment = {
+        id: result.rows[0].id,
+        item_id: itemId,
+        user_id: userId,
+        first_name: userName,
+        comment: comment,
+        created_at: result.rows[0].created_at,
+      };
+
+      io.to(String(listId)).emit("receive_comment", {
+        itemId,
+        comment: newComment,
+      });
+    } catch (err) {
+      console.error("Error adding comment:", err);
+    }
   });
 });
 

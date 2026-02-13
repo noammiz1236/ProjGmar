@@ -31,9 +31,16 @@ const ItemComments = ({ itemId, listId }) => {
     return () => socket.off("receive_comment", handleNewComment);
   }, [itemId, listId]);
 
+  const userComment = comments.find((c) => c.user_id === user.id);
+  const hasCommented = !!userComment;
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!newComment.trim()) return;
+    if (hasCommented) {
+      alert("כבר הוספת הערה לפריט זה");
+      return;
+    }
     socket.emit("add_comment", {
       itemId,
       listId,
@@ -52,7 +59,10 @@ const ItemComments = ({ itemId, listId }) => {
           {comments.map((c) => (
             <div key={c.id} className="mb-1">
               <small>
-                <strong>{c.user_name}</strong>: {c.comment}
+                <strong>{c.first_name}</strong>: {c.comment}
+                {c.user_id === user.id && (
+                  <span className="badge bg-primary ms-1" style={{ fontSize: "0.65rem" }}>שלך</span>
+                )}
               </small>
             </div>
           ))}
@@ -61,18 +71,23 @@ const ItemComments = ({ itemId, listId }) => {
           )}
         </>
       )}
-      <form onSubmit={handleSubmit} className="d-flex gap-1 mt-1">
-        <input
-          type="text"
-          className="form-control form-control-sm"
-          value={newComment}
-          onChange={(e) => setNewComment(e.target.value)}
-          placeholder="הוסף הערה..."
-        />
-        <button className="btn btn-sm btn-primary" type="submit">
-          שלח
-        </button>
-      </form>
+      {!hasCommented && (
+        <form onSubmit={handleSubmit} className="d-flex gap-1 mt-1">
+          <input
+            type="text"
+            className="form-control form-control-sm"
+            value={newComment}
+            onChange={(e) => setNewComment(e.target.value)}
+            placeholder="הוסף הערה..."
+          />
+          <button className="btn btn-sm btn-primary" type="submit">
+            שלח
+          </button>
+        </form>
+      )}
+      {hasCommented && (
+        <small className="text-muted d-block mt-1">כבר הוספת הערה לפריט זה</small>
+      )}
     </div>
   );
 };

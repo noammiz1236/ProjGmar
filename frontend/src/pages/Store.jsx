@@ -247,14 +247,14 @@ const Store = () => {
             <div className="d-flex flex-column gap-3">
               {products.map((product, index) => (
                 <div
-                  key={`${product.item_id}-${product.chain_id}-${index}`}
+                  key={`${product.id}-${product.chain_id}-${index}`}
                   className="sc-product-row"
                 >
                   <div
                     className="d-flex align-items-center gap-3 flex-grow-1"
                     style={{ cursor: "pointer", minWidth: 0 }}
                     onClick={() =>
-                      navigate(`/product/${product.item_id}`, {
+                      navigate(`/product/${product.id}`, {
                         state: { product },
                       })
                     }
