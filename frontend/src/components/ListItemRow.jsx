@@ -44,6 +44,26 @@ const ListItemRow = ({ item, listId }) => {
           style={{ width: "20px", height: "20px", flexShrink: 0, accentColor: "var(--sc-primary)" }}
         />
 
+        {/* Product Image */}
+        {item.image_url && (
+          <img
+            src={item.image_url}
+            alt={item.itemname}
+            style={{
+              width: "45px",
+              height: "45px",
+              objectFit: "contain",
+              borderRadius: "6px",
+              border: "1px solid #e0e0e0",
+              flexShrink: 0,
+              backgroundColor: "#fff",
+            }}
+            onError={(e) => {
+              e.target.style.display = "none";
+            }}
+          />
+        )}
+
         {/* Item info */}
         <div className="flex-grow-1" style={{ minWidth: 0 }}>
           <div className="d-flex align-items-center gap-2 flex-wrap">

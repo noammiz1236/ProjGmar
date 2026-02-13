@@ -10,6 +10,8 @@ import { Server } from "socket.io";
 import http from "http";
 import pg from "pg";
 import nodemailer from "nodemailer";
+import cron from "node-cron";
+import Tesseract from "tesseract.js";
 
 config();
 const port = process.env.PORT;
@@ -101,7 +103,7 @@ const createTransporter = () => {
 
 // Middleware הגדרות כלליות
 app.use(morgan("dev"));
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
 app.use(
@@ -119,39 +121,416 @@ db.query("SELECT NOW()", (err, res) => {
   }
 });
 
+// Create template_schedules table if it doesn't exist
+db.query(`CREATE TABLE IF NOT EXISTS app.template_schedules (
+  id SERIAL PRIMARY KEY,
+  template_id INT NOT NULL,
+  user_id INT NOT NULL,
+  frequency VARCHAR(20) NOT NULL DEFAULT 'weekly',
+  next_run TIMESTAMPTZ,
+  active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+)`);
+
+// Create push_tokens table if it doesn't exist
+db.query(`CREATE TABLE IF NOT EXISTS app.push_tokens (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL,
+  token TEXT NOT NULL UNIQUE,
+  platform VARCHAR(10) DEFAULT 'android',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+)`);
+
+// === NEW TABLES ===
+
+// Chat per list
+db.query(`CREATE TABLE IF NOT EXISTS app.list_chat (
+  id SERIAL PRIMARY KEY,
+  list_id INT NOT NULL,
+  user_id INT NOT NULL,
+  message TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+)`);
+
+// Activity log
+db.query(`CREATE TABLE IF NOT EXISTS app.activity_log (
+  id SERIAL PRIMARY KEY,
+  list_id INT,
+  user_id INT,
+  action VARCHAR(50) NOT NULL,
+  details TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+)`);
+
+// Shopping assignment - add column to existing list_items
+db.query(`ALTER TABLE app.list_items ADD COLUMN IF NOT EXISTS assigned_to INT`);
+
+// Sort order for manual reordering
+db.query(`ALTER TABLE app.list_items ADD COLUMN IF NOT EXISTS sort_order INT DEFAULT 0`);
+
+// Track who checked/bought an item
+db.query(`ALTER TABLE app.list_items ADD COLUMN IF NOT EXISTS checked_by INT`);
+
+// Price alerts
+db.query(`CREATE TABLE IF NOT EXISTS app.price_alerts (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL,
+  item_id INT NOT NULL,
+  target_price DECIMAL NOT NULL,
+  active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+)`);
+
+// Gamification - user points
+db.query(`CREATE TABLE IF NOT EXISTS app.user_points (
+  id SERIAL PRIMARY KEY,
+  user_id INT UNIQUE NOT NULL,
+  points INT DEFAULT 0,
+  streak_days INT DEFAULT 0,
+  last_active DATE
+)`);
+
+// Gamification - user badges
+db.query(`CREATE TABLE IF NOT EXISTS app.user_badges (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL,
+  badge_name VARCHAR(50) NOT NULL,
+  earned_at TIMESTAMPTZ DEFAULT NOW()
+)`);
+
+// Recipes
+db.query(`CREATE TABLE IF NOT EXISTS app.recipes (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  ingredients JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+)`);
+
+// Meal plans
+db.query(`CREATE TABLE IF NOT EXISTS app.meal_plans (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL,
+  date DATE NOT NULL,
+  meal_type VARCHAR(20) NOT NULL,
+  recipe_id INT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+)`);
+
+// Pantry items (expiration tracker)
+db.query(`CREATE TABLE IF NOT EXISTS app.pantry_items (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL,
+  item_name VARCHAR(200) NOT NULL,
+  expiry_date DATE NOT NULL,
+  quantity INT DEFAULT 1,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+)`);
+
+app.get("/api/items/barcode/:barcode", async (req, res) => {
+  const { barcode } = req.params;
+  if (!barcode) return res.json({ item: null });
+  try {
+    const itemResult = await db.query(
+      `SELECT id, name, barcode, item_code, image_url FROM app.items WHERE barcode = $1 LIMIT 1`,
+      [barcode],
+    );
+    if (itemResult.rows.length === 0) {
+      return res.json({ item: null });
+    }
+    const item = itemResult.rows[0];
+    const pricesResult = await db.query(
+      `SELECT p.price, c.name as chain_name, b.branch_name
+       FROM app.prices p
+       JOIN app.branches b ON b.id = p.branch_id
+       JOIN app.chains c ON c.id = b.chain_id
+       WHERE p.item_id = $1
+       ORDER BY p.price ASC`,
+      [item.id],
+    );
+    return res.json({ item, prices: pricesResult.rows });
+  } catch (e) {
+    console.error("Barcode lookup error:", e.message);
+    return res.status(500).json({ item: null });
+  }
+});
+
+app.get("/api/suggestions", authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT itemname, COUNT(*) as freq, MAX(price) as price, MAX(quantity) as quantity
+       FROM app.list_items li
+       JOIN app.list_members lm ON lm.list_id = li.listid
+       WHERE lm.user_id = $1
+       GROUP BY itemname
+       ORDER BY freq DESC
+       LIMIT 10`,
+      [req.userId],
+    );
+    return res.json(result.rows);
+  } catch (e) {
+    console.error("Suggestions error:", e.message);
+    return res.status(500).json([]);
+  }
+});
+
+// === PUSH NOTIFICATIONS ===
+
+// Helper: send Expo push notifications
+async function sendPushNotifications(userIds, title, body, data = {}) {
+  try {
+    if (!userIds || userIds.length === 0) return;
+    const placeholders = userIds.map((_, i) => `$${i + 1}`).join(",");
+    const result = await db.query(
+      `SELECT token FROM app.push_tokens WHERE user_id IN (${placeholders})`,
+      userIds,
+    );
+    const tokens = result.rows.map((r) => r.token).filter((t) => t.startsWith("ExponentPushToken"));
+    if (tokens.length === 0) return;
+
+    const messages = tokens.map((token) => ({
+      to: token,
+      sound: "default",
+      title,
+      body,
+      data,
+    }));
+
+    // Send in chunks of 100 (Expo limit)
+    for (let i = 0; i < messages.length; i += 100) {
+      const chunk = messages.slice(i, i + 100);
+      await fetch("https://exp.host/--/api/v2/push/send", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(chunk),
+      });
+    }
+  } catch (err) {
+    console.error("Error sending push notifications:", err);
+  }
+}
+
+// === ACTIVITY LOG HELPER ===
+async function logActivity(listId, userId, action, details) {
+  try {
+    await db.query(
+      `INSERT INTO app.activity_log (list_id, user_id, action, details) VALUES ($1, $2, $3, $4)`,
+      [listId, userId, action, details],
+    );
+  } catch (err) {
+    console.error("Error logging activity:", err);
+  }
+}
+
+// === GAMIFICATION HELPERS ===
+async function awardPoints(userId, amount, reason) {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+
+    // Upsert user points and update streak
+    const existing = await db.query(
+      `SELECT points, streak_days, last_active FROM app.user_points WHERE user_id = $1`,
+      [userId],
+    );
+
+    if (existing.rows.length === 0) {
+      await db.query(
+        `INSERT INTO app.user_points (user_id, points, streak_days, last_active) VALUES ($1, $2, 1, $3)`,
+        [userId, amount, today],
+      );
+    } else {
+      const row = existing.rows[0];
+      let newStreak = row.streak_days;
+      if (row.last_active) {
+        const lastActive = new Date(row.last_active);
+        const todayDate = new Date(today);
+        const diffDays = Math.floor((todayDate - lastActive) / (1000 * 60 * 60 * 24));
+        if (diffDays === 1) {
+          newStreak = row.streak_days + 1;
+        } else if (diffDays > 1) {
+          newStreak = 1;
+        }
+      }
+      await db.query(
+        `UPDATE app.user_points SET points = points + $1, streak_days = $2, last_active = $3 WHERE user_id = $4`,
+        [amount, newStreak, today, userId],
+      );
+    }
+
+    // Check badge milestones
+    const updatedPoints = await db.query(
+      `SELECT points, streak_days FROM app.user_points WHERE user_id = $1`,
+      [userId],
+    );
+    const currentPoints = updatedPoints.rows[0];
+
+    // Badge: first_item
+    if (reason === "item_added") {
+      const itemCount = await db.query(
+        `SELECT COUNT(*) as cnt FROM app.list_items WHERE addby = $1`,
+        [userId],
+      );
+      if (parseInt(itemCount.rows[0].cnt) === 1) {
+        const hasBadge = await db.query(
+          `SELECT id FROM app.user_badges WHERE user_id = $1 AND badge_name = 'first_item'`,
+          [userId],
+        );
+        if (hasBadge.rows.length === 0) {
+          await db.query(
+            `INSERT INTO app.user_badges (user_id, badge_name) VALUES ($1, 'first_item')`,
+            [userId],
+          );
+        }
+      }
+    }
+
+    // Badge: shopper_10 (10 items paid)
+    if (reason === "item_paid") {
+      const paidCount = await db.query(
+        `SELECT COUNT(*) as cnt FROM app.list_items WHERE paid_by = $1`,
+        [userId],
+      );
+      if (parseInt(paidCount.rows[0].cnt) >= 10) {
+        const hasBadge = await db.query(
+          `SELECT id FROM app.user_badges WHERE user_id = $1 AND badge_name = 'shopper_10'`,
+          [userId],
+        );
+        if (hasBadge.rows.length === 0) {
+          await db.query(
+            `INSERT INTO app.user_badges (user_id, badge_name) VALUES ($1, 'shopper_10')`,
+            [userId],
+          );
+        }
+      }
+    }
+
+    // Badge: streak_7 (7 day streak)
+    if (currentPoints && currentPoints.streak_days >= 7) {
+      const hasBadge = await db.query(
+        `SELECT id FROM app.user_badges WHERE user_id = $1 AND badge_name = 'streak_7'`,
+        [userId],
+      );
+      if (hasBadge.rows.length === 0) {
+        await db.query(
+          `INSERT INTO app.user_badges (user_id, badge_name) VALUES ($1, 'streak_7')`,
+          [userId],
+        );
+      }
+    }
+  } catch (err) {
+    console.error("Error awarding points:", err);
+  }
+}
+
+// Save push token
+app.post("/api/push-token", authenticateToken, async (req, res) => {
+  const { token, platform } = req.body;
+  if (!token) return res.status(400).json({ message: "Token required" });
+  try {
+    await db.query(
+      `INSERT INTO app.push_tokens (user_id, token, platform)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (token) DO UPDATE SET user_id = $1, platform = $3`,
+      [req.userId, token, platform || "android"],
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("Error saving push token:", err);
+    return res.status(500).json({ message: "Error saving token" });
+  }
+});
+
+// Remove push token (on logout)
+app.delete("/api/push-token", authenticateToken, async (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ message: "Token required" });
+  try {
+    await db.query("DELETE FROM app.push_tokens WHERE token = $1 AND user_id = $2", [token, req.userId]);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("Error removing push token:", err);
+    return res.status(500).json({ message: "Error removing token" });
+  }
+});
+
+// === RECEIPT SCANNER (OCR) ===
+
+// Parse receipt text into items
+function parseReceiptText(text) {
+  const lines = text.split("\n").map((l) => l.trim()).filter((l) => l.length > 1);
+  const items = [];
+  // Israeli receipt patterns: item name followed by price
+  // Common patterns: "פריט   12.90", "פריט x2  25.80", "2 x פריט  12.90"
+  const pricePattern = /(\d+[.,]\d{2})\s*$/;
+  const qtyPattern = /[xX×]\s*(\d+)|(\d+)\s*[xX×]/;
+
+  for (const line of lines) {
+    // Skip header/footer lines (dates, addresses, totals, tax, etc.)
+    if (/סה["\u05F4]?כ|מע["\u05F4]?מ|תאריך|כתובת|טלפון|מזומן|אשראי|עודף|ח\.פ|ע\.מ|מספר קבלה/i.test(line)) continue;
+    if (/^\d{2}[/.-]\d{2}[/.-]\d{2,4}$/.test(line)) continue;
+    if (/^[-=*_]{3,}$/.test(line)) continue;
+
+    const priceMatch = line.match(pricePattern);
+    if (priceMatch) {
+      const price = parseFloat(priceMatch[1].replace(",", "."));
+      let name = line.slice(0, priceMatch.index).trim();
+      let quantity = 1;
+
+      // Check for quantity
+      const qtyMatch = name.match(qtyPattern);
+      if (qtyMatch) {
+        quantity = parseInt(qtyMatch[1] || qtyMatch[2], 10) || 1;
+        name = name.replace(qtyPattern, "").trim();
+      }
+
+      // Clean up name
+      name = name.replace(/\s+/g, " ").trim();
+      if (name.length >= 2 && price > 0 && price < 10000) {
+        items.push({ name, price, quantity });
+      }
+    }
+  }
+  return items;
+}
+
+app.post("/api/receipt/scan", authenticateToken, async (req, res) => {
+  const { image } = req.body;
+  if (!image) return res.status(400).json({ message: "Image required" });
+
+  try {
+    // Convert base64 to buffer
+    const imageBuffer = Buffer.from(image, "base64");
+
+    // Run OCR with Tesseract (Hebrew + English)
+    const result = await Tesseract.recognize(imageBuffer, "heb+eng", {
+      logger: () => {},
+    });
+
+    const text = result.data.text;
+    const items = parseReceiptText(text);
+
+    return res.json({ items, rawText: text });
+  } catch (err) {
+    console.error("Receipt OCR error:", err);
+    return res.status(500).json({ message: "Error processing receipt", items: [] });
+  }
+});
+
 app.get("/api/search", async (req, res) => {
   const search = req.query.q;
   if (!search) return res.json([]);
   try {
+    const searchTerm = `%${search}%`;
     const reply = await db.query(
       `SELECT DISTINCT ON (i.id)
        i.id as item_id,
        i.name as item_name,
        i.barcode,
        i.item_code,
-       p.price,
-       c.id as chain_id,
-       c.name as chain_name,
-       b.branch_name
-       FROM app.items i
-       LEFT JOIN app.prices p ON p.item_id = i.id
-       LEFT JOIN app.branches b ON b.id = p.branch_id
-       LEFT JOIN app.chains c ON c.id = b.chain_id
-       WHERE i.name ILIKE $1
-       ORDER BY i.id, p.price DESC NULLS LAST`,
-      [search],
-    );
-    if (reply.rows.length > 0) {
-    } else {
-      const searchTerm = `${search}%`;
-      console.log("Search term with wildcards:", searchTerm);
-
-      reply = await db.query(
-        `SELECT DISTINCT ON (i.id)
-       i.id as item_id,
-       i.name as item_name,
-       i.barcode,
-       i.item_code,
+       i.image_url,
        p.price,
        c.id as chain_id,
        c.name as chain_name,
@@ -163,9 +542,8 @@ app.get("/api/search", async (req, res) => {
        WHERE i.name ILIKE $1
        ORDER BY i.id, p.price DESC NULLS LAST
        LIMIT 15`,
-        [searchTerm],
-      );
-    }
+      [searchTerm],
+    );
     res.json(reply.rows);
   } catch (e) {
     console.error("Search error:", e.message);
@@ -418,6 +796,7 @@ app.post("/api/login", async (req, res) => {
         username: user.username,
       },
       accessToken,
+      refreshToken,
     });
   } catch (err) {
     console.error(err);
@@ -823,6 +1202,131 @@ app.post("/api/reset-password", async (req, res) => {
 // // ריצת ניקוי ראשוני בהפעלה
 // cleanupExpiredTokens();
 
+// === PRICE HISTORY ===
+
+// GET /api/products/:id/price-history — price history for a product
+app.get("/api/products/:id/price-history", authenticateToken, async (req, res) => {
+  const itemId = req.params.id;
+  try {
+    const result = await db.query(
+      `SELECT p.price, p.updated_at, c.name as chain_name, b.branch_name
+       FROM app.prices p
+       JOIN app.branches b ON b.id = p.branch_id
+       JOIN app.chains c ON c.id = b.chain_id
+       WHERE p.item_id = $1
+       ORDER BY p.updated_at DESC`,
+      [itemId],
+    );
+    return res.json({ priceHistory: result.rows });
+  } catch (err) {
+    console.error("Error fetching price history:", err);
+    return res.status(500).json({ message: "Error fetching price history" });
+  }
+});
+
+// === TEMPLATE SCHEDULES ===
+
+// POST /api/templates/:id/schedule — save a recurring schedule for a template
+app.post("/api/templates/:id/schedule", authenticateToken, async (req, res) => {
+  const templateId = req.params.id;
+  const { frequency } = req.body;
+
+  if (!frequency || !["weekly", "biweekly", "monthly"].includes(frequency)) {
+    return res.status(400).json({ message: "Invalid frequency. Must be weekly, biweekly, or monthly." });
+  }
+
+  try {
+    // Verify the template belongs to this user
+    const templateCheck = await db.query(
+      "SELECT id FROM app.list_templates WHERE id = $1 AND user_id = $2",
+      [templateId, req.userId],
+    );
+    if (templateCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Template not found or not yours" });
+    }
+
+    // Calculate next_run based on frequency
+    let intervalExpression;
+    if (frequency === "weekly") {
+      intervalExpression = "7 days";
+    } else if (frequency === "biweekly") {
+      intervalExpression = "14 days";
+    } else {
+      intervalExpression = "1 month";
+    }
+
+    // Upsert: if a schedule already exists for this template+user, update it
+    const result = await db.query(
+      `INSERT INTO app.template_schedules (template_id, user_id, frequency, next_run, active)
+       VALUES ($1, $2, $3, NOW() + interval '${intervalExpression}', true)
+       ON CONFLICT (template_id, user_id) DO UPDATE
+       SET frequency = $3, next_run = NOW() + interval '${intervalExpression}', active = true
+       RETURNING *`,
+      [templateId, req.userId, frequency],
+    );
+
+    // If ON CONFLICT doesn't work (no unique constraint yet), fallback: check + insert/update
+    if (result.rows.length === 0) {
+      const existing = await db.query(
+        "SELECT id FROM app.template_schedules WHERE template_id = $1 AND user_id = $2",
+        [templateId, req.userId],
+      );
+      if (existing.rows.length > 0) {
+        const updateResult = await db.query(
+          `UPDATE app.template_schedules SET frequency = $1, next_run = NOW() + interval '${intervalExpression}', active = true
+           WHERE template_id = $2 AND user_id = $3 RETURNING *`,
+          [frequency, templateId, req.userId],
+        );
+        return res.json({ schedule: updateResult.rows[0] });
+      } else {
+        const insertResult = await db.query(
+          `INSERT INTO app.template_schedules (template_id, user_id, frequency, next_run, active)
+           VALUES ($1, $2, $3, NOW() + interval '${intervalExpression}', true) RETURNING *`,
+          [templateId, req.userId, frequency],
+        );
+        return res.json({ schedule: insertResult.rows[0] });
+      }
+    }
+
+    return res.json({ schedule: result.rows[0] });
+  } catch (err) {
+    // Handle case where ON CONFLICT fails due to missing unique constraint
+    if (err.code === "42P10" || err.message.includes("ON CONFLICT")) {
+      try {
+        const existing = await db.query(
+          "SELECT id FROM app.template_schedules WHERE template_id = $1 AND user_id = $2",
+          [templateId, req.userId],
+        );
+        let intervalExpression;
+        if (frequency === "weekly") intervalExpression = "7 days";
+        else if (frequency === "biweekly") intervalExpression = "14 days";
+        else intervalExpression = "1 month";
+
+        if (existing.rows.length > 0) {
+          const updateResult = await db.query(
+            `UPDATE app.template_schedules SET frequency = $1, next_run = NOW() + interval '${intervalExpression}', active = true
+             WHERE template_id = $2 AND user_id = $3 RETURNING *`,
+            [frequency, templateId, req.userId],
+          );
+          return res.json({ schedule: updateResult.rows[0] });
+        } else {
+          const insertResult = await db.query(
+            `INSERT INTO app.template_schedules (template_id, user_id, frequency, next_run, active)
+             VALUES ($1, $2, $3, NOW() + interval '${intervalExpression}', true) RETURNING *`,
+            [templateId, req.userId, frequency],
+          );
+          return res.json({ schedule: insertResult.rows[0] });
+        }
+      } catch (innerErr) {
+        console.error("Error saving schedule (fallback):", innerErr);
+        return res.status(500).json({ message: "Error saving schedule" });
+      }
+    }
+    console.error("Error saving schedule:", err);
+    return res.status(500).json({ message: "Error saving schedule" });
+  }
+});
+
 // === LIST ROUTES ===
 
 // GET /api/lists — all lists for the authenticated user
@@ -863,12 +1367,17 @@ app.get("/api/lists/:id/items", authenticateToken, async (req, res) => {
       return res.status(404).json({ message: "List not found" });
 
     const itemsRes = await db.query(
-      `SELECT li.*, u.first_name AS paid_by_name, u2.first_name AS note_by_name
+      `SELECT li.*, u.first_name AS paid_by_name, u2.first_name AS note_by_name,
+              u3.first_name AS added_by_name, u4.first_name AS checked_by_name,
+              u5.first_name AS assigned_to_name
        FROM app.list_items li
        LEFT JOIN app2.users u ON li.paid_by = u.id
        LEFT JOIN app2.users u2 ON li.note_by = u2.id
+       LEFT JOIN app2.users u3 ON li.addby = u3.id
+       LEFT JOIN app2.users u4 ON li.checked_by = u4.id
+       LEFT JOIN app2.users u5 ON li.assigned_to = u5.id
        WHERE li.listid = $1
-       ORDER BY li.addat DESC`,
+       ORDER BY CASE WHEN li.sort_order > 0 THEN li.sort_order ELSE 999999 END ASC, li.addat DESC`,
       [listId],
     );
 
@@ -962,90 +1471,182 @@ app.post("/api/lists/:id/leave", authenticateToken, async (req, res) => {
 app.get("/api/lists/:id/compare", authenticateToken, async (req, res) => {
   const listId = req.params.id;
   try {
-    // Get list items that have a linked product_id
+    // Get all list items
     const itemsRes = await db.query(
-      `SELECT li.id, li.itemname, li.quantity, li.product_id
+      `SELECT li.id, li.itemname, li.quantity, li.product_id, li.price AS user_price
        FROM app.list_items li
        WHERE li.listid = $1`,
       [listId],
     );
     const allItems = itemsRes.rows;
-    const linkedItems = allItems.filter((i) => i.product_id);
-    const unlinkedCount = allItems.length - linkedItems.length;
-
-    if (linkedItems.length === 0) {
-      return res.json({ chains: [], linkedCount: 0, unlinkedCount });
+    if (allItems.length === 0) {
+      return res.json({ chains: [], bestMix: null, totalItems: 0 });
     }
 
+    // 1) Items with product_id → direct price lookup
+    const linkedItems = allItems.filter((i) => i.product_id);
+    const unlinkedItems = allItems.filter((i) => !i.product_id);
     const productIds = linkedItems.map((i) => i.product_id);
 
-    // Get best price per product per chain
-    const pricesRes = await db.query(
-      `SELECT DISTINCT ON (c.id, p.item_id)
-              c.id AS chain_id, c.name AS chain_name,
-              p.item_id AS product_id, p.price
-       FROM app.prices p
-       JOIN app.branches b ON p.branch_id = b.id
-       JOIN app.chains c ON b.chain_id = c.id
-       WHERE p.item_id = ANY($1)
-       ORDER BY c.id, p.item_id, p.price ASC`,
-      [productIds],
-    );
+    // Get prices for linked items
+    let priceRows = [];
+    if (productIds.length > 0) {
+      const pricesRes = await db.query(
+        `SELECT DISTINCT ON (c.id, p.item_id)
+                c.id AS chain_id, c.name AS chain_name,
+                p.item_id AS product_id, p.price
+         FROM app.prices p
+         JOIN app.branches b ON p.branch_id = b.id
+         JOIN app.chains c ON b.chain_id = c.id
+         WHERE p.item_id = ANY($1)
+         ORDER BY c.id, p.item_id, p.price ASC`,
+        [productIds],
+      );
+      priceRows = pricesRes.rows;
+    }
+
+    // 2) Items without product_id → fuzzy name match
+    let nameMatchRows = [];
+    if (unlinkedItems.length > 0) {
+      const namePatterns = unlinkedItems.map((i) => `%${i.itemname}%`);
+      const placeholders = namePatterns.map((_, idx) => `i.name ILIKE $${idx + 1}`).join(" OR ");
+      if (placeholders) {
+        try {
+          const fuzzyRes = await db.query(
+            `SELECT DISTINCT ON (c.id, i.id)
+                    c.id AS chain_id, c.name AS chain_name,
+                    i.id AS product_id, i.name AS product_name, p.price
+             FROM app.prices p
+             JOIN app.items i ON p.item_id = i.id
+             JOIN app.branches b ON p.branch_id = b.id
+             JOIN app.chains c ON b.chain_id = c.id
+             WHERE ${placeholders}
+             ORDER BY c.id, i.id, p.price ASC`,
+            namePatterns,
+          );
+          nameMatchRows = fuzzyRes.rows;
+        } catch (e) {
+          // Name matching is best-effort
+        }
+      }
+    }
+
+    // Map unlinked item names to best-matching product_ids
+    const nameToProduct = {};
+    for (const row of nameMatchRows) {
+      for (const item of unlinkedItems) {
+        if (row.product_name && row.product_name.toLowerCase().includes(item.itemname.toLowerCase())) {
+          if (!nameToProduct[item.id]) {
+            nameToProduct[item.id] = row.product_id;
+          }
+        }
+      }
+    }
+
+    // Combine all matchable items
+    const matchableItems = [
+      ...linkedItems,
+      ...unlinkedItems.filter((i) => nameToProduct[i.id]).map((i) => ({
+        ...i,
+        product_id: nameToProduct[i.id],
+      })),
+    ];
+    const unmatchedItems = unlinkedItems.filter((i) => !nameToProduct[i.id]);
+    const allPriceRows = [...priceRows, ...nameMatchRows];
 
     // Group by chain
     const chainMap = {};
-    for (const row of pricesRes.rows) {
+    for (const row of allPriceRows) {
       if (!chainMap[row.chain_id]) {
         chainMap[row.chain_id] = {
-          chainId: row.chain_id,
-          chainName: row.chain_name,
+          chain_id: row.chain_id,
+          chain_name: row.chain_name,
           prices: {},
         };
       }
-      chainMap[row.chain_id].prices[row.product_id] = parseFloat(row.price);
+      const pid = row.product_id;
+      const price = parseFloat(row.price);
+      if (!chainMap[row.chain_id].prices[pid] || price < chainMap[row.chain_id].prices[pid]) {
+        chainMap[row.chain_id].prices[pid] = price;
+      }
     }
 
-    // Build comparison
+    // Build per-chain comparison
     const chains = Object.values(chainMap).map((chain) => {
       let total = 0;
-      let missingCount = 0;
-      const items = linkedItems.map((li) => {
+      const missing = [];
+      const items = matchableItems.map((li) => {
         const price = chain.prices[li.product_id];
         const qty = parseFloat(li.quantity) || 1;
         if (price !== undefined) {
           const subtotal = price * qty;
           total += subtotal;
-          return {
-            itemName: li.itemname,
-            price,
-            quantity: qty,
-            subtotal,
-            available: true,
-          };
+          return { item_name: li.itemname, price, quantity: qty, subtotal, available: true };
         } else {
-          missingCount++;
-          return {
-            itemName: li.itemname,
-            price: 0,
-            quantity: qty,
-            subtotal: 0,
-            available: false,
-          };
+          missing.push(li.itemname);
+          return { item_name: li.itemname, price: 0, quantity: qty, subtotal: 0, available: false };
         }
       });
       return {
-        chainId: chain.chainId,
-        chainName: chain.chainName,
+        chain_id: chain.chain_id,
+        chain_name: chain.chain_name,
         total,
-        items,
-        missingCount,
-        complete: missingCount === 0,
+        items: items.filter((i) => i.available),
+        missing,
+        missingCount: missing.length,
+        itemCount: items.filter((i) => i.available).length,
       };
     });
 
     chains.sort((a, b) => a.total - b.total);
 
-    return res.json({ chains, linkedCount: linkedItems.length, unlinkedCount });
+    // Cheapest single store
+    const cheapest = chains.length > 0 ? { chain_name: chains[0].chain_name, total: chains[0].total } : null;
+    const mostExpensive = chains.length > 1 ? chains[chains.length - 1].total : null;
+
+    // 3) Best Mix — cheapest per item across all stores
+    const bestMixItems = [];
+    let bestMixTotal = 0;
+    const bestMixStores = new Set();
+    for (const li of matchableItems) {
+      let bestPrice = Infinity;
+      let bestChain = null;
+      for (const chain of Object.values(chainMap)) {
+        const p = chain.prices[li.product_id];
+        if (p !== undefined && p < bestPrice) {
+          bestPrice = p;
+          bestChain = chain.chain_name;
+        }
+      }
+      const qty = parseFloat(li.quantity) || 1;
+      if (bestChain) {
+        bestMixItems.push({ item_name: li.itemname, price: bestPrice, quantity: qty, subtotal: bestPrice * qty, store: bestChain });
+        bestMixTotal += bestPrice * qty;
+        bestMixStores.add(bestChain);
+      }
+    }
+
+    const bestMix = bestMixItems.length > 0 ? {
+      total: bestMixTotal,
+      items: bestMixItems,
+      storeCount: bestMixStores.size,
+      stores: [...bestMixStores],
+    } : null;
+
+    // Savings calculation
+    const savings = cheapest && mostExpensive ? mostExpensive - cheapest.total : 0;
+    const bestMixSavings = bestMix && mostExpensive ? mostExpensive - bestMix.total : 0;
+
+    return res.json({
+      chains,
+      cheapest,
+      bestMix,
+      totalItems: allItems.length,
+      matchedItems: matchableItems.length,
+      unmatchedItems: unmatchedItems.length,
+      savings: parseFloat(savings.toFixed(2)),
+      bestMixSavings: parseFloat(bestMixSavings.toFixed(2)),
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: "Error comparing prices" });
@@ -1421,6 +2022,14 @@ app.post("/api/kid-requests", authenticateToken, async (req, res) => {
       product_id: productId,
     });
 
+    // Push notification to parent
+    sendPushNotifications(
+      [parentId],
+      "בקשה מהילד/ה",
+      `${childName} רוצה להוסיף ${itemName} לרשימה ${listName}`,
+      { type: "kid_request", requestId },
+    );
+
     return res.status(201).json({ message: "Request sent" });
   } catch (err) {
     console.error(err);
@@ -1526,6 +2135,413 @@ app.get(
   },
 );
 
+// === LIST CHAT ENDPOINT ===
+app.get("/api/lists/:id/chat", authenticateToken, async (req, res) => {
+  const listId = req.params.id;
+  try {
+    const result = await db.query(
+      `SELECT lc.id, lc.list_id AS "listId", lc.user_id AS "userId", u.first_name AS "firstName",
+              lc.message, lc.created_at AS "createdAt"
+       FROM app.list_chat lc
+       JOIN app2.users u ON lc.user_id = u.id
+       WHERE lc.list_id = $1
+       ORDER BY lc.created_at DESC
+       LIMIT 50`,
+      [listId],
+    );
+    return res.json({ messages: result.rows.reverse() });
+  } catch (err) {
+    console.error("Error fetching chat messages:", err);
+    return res.status(500).json({ message: "Error fetching chat messages" });
+  }
+});
+
+// === ACTIVITY LOG ENDPOINT ===
+app.get("/api/lists/:id/activity", authenticateToken, async (req, res) => {
+  const listId = req.params.id;
+  try {
+    const result = await db.query(
+      `SELECT al.id, al.list_id, al.user_id, al.action, al.details, al.created_at,
+              u.first_name
+       FROM app.activity_log al
+       LEFT JOIN app2.users u ON al.user_id = u.id
+       WHERE al.list_id = $1
+       ORDER BY al.created_at DESC
+       LIMIT 50`,
+      [listId],
+    );
+    return res.json({ activities: result.rows });
+  } catch (err) {
+    console.error("Error fetching activity log:", err);
+    return res.status(500).json({ message: "Error fetching activity log" });
+  }
+});
+
+// === DELIVERY PROVIDERS ===
+const DELIVERY_PROVIDERS = [
+  { id: 1, chain_name: 'רמי לוי', website_url: 'https://www.rami-levy.co.il/he/online', icon: 'cart-outline' },
+  { id: 2, chain_name: 'שופרסל', website_url: 'https://www.shufersal.co.il/online/he/default', icon: 'storefront-outline' },
+  { id: 3, chain_name: 'יוחננוף', website_url: 'https://yochananof.co.il/', icon: 'basket-outline' },
+  { id: 4, chain_name: 'ויקטורי', website_url: 'https://www.victoryonline.co.il/', icon: 'bag-outline' },
+  { id: 5, chain_name: 'אושר עד', website_url: 'https://osherad.co.il/', icon: 'pricetag-outline' },
+];
+
+app.get("/api/delivery/providers", authenticateToken, (req, res) => {
+  res.json({ providers: DELIVERY_PROVIDERS });
+});
+
+// === REORDER LIST ITEMS ===
+app.put("/api/lists/:id/reorder", authenticateToken, async (req, res) => {
+  const listId = req.params.id;
+  const { items } = req.body; // Array of { itemId, sortOrder }
+  if (!items || !Array.isArray(items)) {
+    return res.status(400).json({ message: "items array is required" });
+  }
+  try {
+    const membership = await db.query(
+      "SELECT status FROM app.list_members WHERE list_id = $1 AND user_id = $2",
+      [listId, req.userId]
+    );
+    if (membership.rows.length === 0) {
+      return res.status(403).json({ message: "Not a member of this list" });
+    }
+    const client = await db.connect();
+    try {
+      await client.query("BEGIN");
+      for (const item of items) {
+        await client.query(
+          "UPDATE app.list_items SET sort_order = $1 WHERE id = $2 AND listid = $3",
+          [item.sortOrder, item.itemId, listId]
+        );
+      }
+      await client.query("COMMIT");
+      res.json({ success: true });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error("Error reordering items:", err);
+    return res.status(500).json({ message: "Error reordering items" });
+  }
+});
+
+// === ACTIVITY FEED (CROSS-LIST) ===
+app.get("/api/activity/feed", authenticateToken, async (req, res) => {
+  const userId = req.userId;
+  const { action, from, to, limit = 50, offset = 0 } = req.query;
+  try {
+    const result = await db.query(
+      `SELECT al.id, al.list_id, al.user_id, al.action, al.details, al.created_at,
+              u.first_name AS user_name,
+              l.list_name
+       FROM app.activity_log al
+       JOIN app.list_members lm ON lm.list_id = al.list_id AND lm.user_id = $1
+       LEFT JOIN app2.users u ON al.user_id = u.id
+       LEFT JOIN app.list l ON al.list_id = l.id
+       WHERE ($2::VARCHAR IS NULL OR al.action = $2)
+         AND ($3::TIMESTAMPTZ IS NULL OR al.created_at >= $3::TIMESTAMPTZ)
+         AND ($4::TIMESTAMPTZ IS NULL OR al.created_at <= $4::TIMESTAMPTZ)
+       ORDER BY al.created_at DESC
+       LIMIT $5 OFFSET $6`,
+      [userId, action || null, from || null, to || null, parseInt(limit), parseInt(offset)]
+    );
+    return res.json({ activities: result.rows });
+  } catch (err) {
+    console.error("Error fetching activity feed:", err);
+    return res.status(500).json({ message: "Error fetching activity feed" });
+  }
+});
+
+// === PRICE ALERTS ENDPOINTS ===
+app.post("/api/price-alerts", authenticateToken, async (req, res) => {
+  const { itemId, targetPrice } = req.body;
+  if (!itemId || !targetPrice) {
+    return res.status(400).json({ message: "itemId and targetPrice are required" });
+  }
+  try {
+    const result = await db.query(
+      `INSERT INTO app.price_alerts (user_id, item_id, target_price) VALUES ($1, $2, $3) RETURNING *`,
+      [req.userId, itemId, targetPrice],
+    );
+    return res.status(201).json({ alert: result.rows[0] });
+  } catch (err) {
+    console.error("Error creating price alert:", err);
+    return res.status(500).json({ message: "Error creating price alert" });
+  }
+});
+
+app.get("/api/price-alerts", authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT pa.id, pa.item_id, pa.target_price, pa.created_at, i.name AS item_name
+       FROM app.price_alerts pa
+       JOIN app.items i ON pa.item_id = i.id
+       WHERE pa.user_id = $1 AND pa.active = true
+       ORDER BY pa.created_at DESC`,
+      [req.userId],
+    );
+    return res.json({ alerts: result.rows });
+  } catch (err) {
+    console.error("Error fetching price alerts:", err);
+    return res.status(500).json({ message: "Error fetching price alerts" });
+  }
+});
+
+app.delete("/api/price-alerts/:id", authenticateToken, async (req, res) => {
+  const alertId = req.params.id;
+  try {
+    await db.query(
+      `UPDATE app.price_alerts SET active = false WHERE id = $1 AND user_id = $2`,
+      [alertId, req.userId],
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("Error deactivating price alert:", err);
+    return res.status(500).json({ message: "Error deactivating price alert" });
+  }
+});
+
+// === GAMIFICATION ENDPOINTS ===
+app.get("/api/gamification/stats", authenticateToken, async (req, res) => {
+  try {
+    const pointsResult = await db.query(
+      `SELECT points, streak_days, last_active FROM app.user_points WHERE user_id = $1`,
+      [req.userId],
+    );
+    const badgesResult = await db.query(
+      `SELECT badge_name, earned_at FROM app.user_badges WHERE user_id = $1 ORDER BY earned_at DESC`,
+      [req.userId],
+    );
+    const stats = pointsResult.rows.length > 0
+      ? pointsResult.rows[0]
+      : { points: 0, streak_days: 0, last_active: null };
+    return res.json({ ...stats, badges: badgesResult.rows });
+  } catch (err) {
+    console.error("Error fetching gamification stats:", err);
+    return res.status(500).json({ message: "Error fetching gamification stats" });
+  }
+});
+
+// === SMART QUANTITY PREDICTION ===
+app.get("/api/predict-quantity/:itemName", authenticateToken, async (req, res) => {
+  const itemName = decodeURIComponent(req.params.itemName);
+  try {
+    const result = await db.query(
+      `SELECT quantity FROM app.list_items li
+       JOIN app.list_members lm ON lm.list_id = li.listid
+       WHERE lm.user_id = $1 AND li.itemname ILIKE $2`,
+      [req.userId, itemName],
+    );
+    if (result.rows.length === 0) {
+      return res.json({ suggestedQuantity: 1, avgQuantity: 1, timesOrdered: 0 });
+    }
+    const quantities = result.rows.map((r) => parseFloat(r.quantity) || 1);
+    const avg = quantities.reduce((a, b) => a + b, 0) / quantities.length;
+    const suggested = Math.round(avg);
+    return res.json({
+      suggestedQuantity: suggested || 1,
+      avgQuantity: parseFloat(avg.toFixed(2)),
+      timesOrdered: quantities.length,
+    });
+  } catch (err) {
+    console.error("Error predicting quantity:", err);
+    return res.status(500).json({ message: "Error predicting quantity" });
+  }
+});
+
+// === RECIPES ENDPOINTS ===
+app.post("/api/recipes", authenticateToken, async (req, res) => {
+  const { name, ingredients } = req.body;
+  if (!name) {
+    return res.status(400).json({ message: "Recipe name is required" });
+  }
+  try {
+    const result = await db.query(
+      `INSERT INTO app.recipes (user_id, name, ingredients) VALUES ($1, $2, $3) RETURNING *`,
+      [req.userId, name, JSON.stringify(ingredients || [])],
+    );
+    return res.status(201).json({ recipe: result.rows[0] });
+  } catch (err) {
+    console.error("Error creating recipe:", err);
+    return res.status(500).json({ message: "Error creating recipe" });
+  }
+});
+
+app.get("/api/recipes", authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT * FROM app.recipes WHERE user_id = $1 ORDER BY created_at DESC`,
+      [req.userId],
+    );
+    return res.json({ recipes: result.rows });
+  } catch (err) {
+    console.error("Error fetching recipes:", err);
+    return res.status(500).json({ message: "Error fetching recipes" });
+  }
+});
+
+app.delete("/api/recipes/:id", authenticateToken, async (req, res) => {
+  const recipeId = req.params.id;
+  try {
+    await db.query(
+      `DELETE FROM app.recipes WHERE id = $1 AND user_id = $2`,
+      [recipeId, req.userId],
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("Error deleting recipe:", err);
+    return res.status(500).json({ message: "Error deleting recipe" });
+  }
+});
+
+// === MEAL PLANS ENDPOINTS ===
+app.post("/api/meal-plans", authenticateToken, async (req, res) => {
+  const { date, mealType, recipeId } = req.body;
+  if (!date || !mealType || !recipeId) {
+    return res.status(400).json({ message: "date, mealType, and recipeId are required" });
+  }
+  try {
+    const result = await db.query(
+      `INSERT INTO app.meal_plans (user_id, date, meal_type, recipe_id) VALUES ($1, $2, $3, $4) RETURNING *`,
+      [req.userId, date, mealType, recipeId],
+    );
+    return res.status(201).json({ mealPlan: result.rows[0] });
+  } catch (err) {
+    console.error("Error creating meal plan:", err);
+    return res.status(500).json({ message: "Error creating meal plan" });
+  }
+});
+
+app.get("/api/meal-plans", authenticateToken, async (req, res) => {
+  const week = req.query.week;
+  if (!week) {
+    return res.status(400).json({ message: "week query parameter (YYYY-MM-DD) is required" });
+  }
+  try {
+    const result = await db.query(
+      `SELECT mp.id, mp.date, mp.meal_type, mp.recipe_id, mp.created_at,
+              r.name AS recipe_name, r.ingredients
+       FROM app.meal_plans mp
+       JOIN app.recipes r ON mp.recipe_id = r.id
+       WHERE mp.user_id = $1 AND mp.date >= $2::date AND mp.date < ($2::date + interval '7 days')
+       ORDER BY mp.date ASC, mp.meal_type ASC`,
+      [req.userId, week],
+    );
+    return res.json({ mealPlans: result.rows });
+  } catch (err) {
+    console.error("Error fetching meal plans:", err);
+    return res.status(500).json({ message: "Error fetching meal plans" });
+  }
+});
+
+app.post("/api/meal-plans/generate-list", authenticateToken, async (req, res) => {
+  const { recipeIds, listId } = req.body;
+  if (!recipeIds || !listId || !Array.isArray(recipeIds) || recipeIds.length === 0) {
+    return res.status(400).json({ message: "recipeIds (array) and listId are required" });
+  }
+  try {
+    // Verify list membership
+    const membership = await db.query(
+      "SELECT id FROM app.list_members WHERE list_id = $1 AND user_id = $2",
+      [listId, req.userId],
+    );
+    if (membership.rows.length === 0) {
+      return res.status(403).json({ message: "Not a member of this list" });
+    }
+
+    // Fetch all recipes
+    const placeholders = recipeIds.map((_, i) => `$${i + 1}`).join(",");
+    const recipesResult = await db.query(
+      `SELECT ingredients FROM app.recipes WHERE id IN (${placeholders}) AND user_id = $${recipeIds.length + 1}`,
+      [...recipeIds, req.userId],
+    );
+
+    // Aggregate ingredients
+    const ingredientMap = {};
+    for (const recipe of recipesResult.rows) {
+      const ingredients = recipe.ingredients || [];
+      for (const ing of ingredients) {
+        const key = (ing.name || "").toLowerCase().trim();
+        if (!key) continue;
+        if (ingredientMap[key]) {
+          ingredientMap[key].quantity += parseFloat(ing.quantity) || 1;
+        } else {
+          ingredientMap[key] = {
+            name: ing.name,
+            quantity: parseFloat(ing.quantity) || 1,
+            unit: ing.unit || null,
+          };
+        }
+      }
+    }
+
+    // Insert aggregated ingredients as list items
+    const addedItems = [];
+    for (const ing of Object.values(ingredientMap)) {
+      const itemName = ing.unit ? `${ing.name} (${ing.unit})` : ing.name;
+      const result = await db.query(
+        `INSERT INTO app.list_items (listId, itemName, quantity, addby, addat, updatedat)
+         VALUES ($1, $2, $3, $4, NOW(), NOW()) RETURNING *`,
+        [listId, itemName, ing.quantity, req.userId],
+      );
+      addedItems.push(result.rows[0]);
+    }
+
+    return res.json({ success: true, itemsAdded: addedItems.length, items: addedItems });
+  } catch (err) {
+    console.error("Error generating list from meal plans:", err);
+    return res.status(500).json({ message: "Error generating list from meal plans" });
+  }
+});
+
+// === PANTRY / EXPIRATION TRACKER ENDPOINTS ===
+app.post("/api/pantry", authenticateToken, async (req, res) => {
+  const { itemName, expiryDate, quantity } = req.body;
+  if (!itemName || !expiryDate) {
+    return res.status(400).json({ message: "itemName and expiryDate are required" });
+  }
+  try {
+    const result = await db.query(
+      `INSERT INTO app.pantry_items (user_id, item_name, expiry_date, quantity) VALUES ($1, $2, $3, $4) RETURNING *`,
+      [req.userId, itemName, expiryDate, quantity || 1],
+    );
+    return res.status(201).json({ item: result.rows[0] });
+  } catch (err) {
+    console.error("Error adding pantry item:", err);
+    return res.status(500).json({ message: "Error adding pantry item" });
+  }
+});
+
+app.get("/api/pantry", authenticateToken, async (req, res) => {
+  try {
+    const result = await db.query(
+      `SELECT * FROM app.pantry_items WHERE user_id = $1 ORDER BY expiry_date ASC`,
+      [req.userId],
+    );
+    return res.json({ items: result.rows });
+  } catch (err) {
+    console.error("Error fetching pantry items:", err);
+    return res.status(500).json({ message: "Error fetching pantry items" });
+  }
+});
+
+app.delete("/api/pantry/:id", authenticateToken, async (req, res) => {
+  const itemId = req.params.id;
+  try {
+    await db.query(
+      `DELETE FROM app.pantry_items WHERE id = $1 AND user_id = $2`,
+      [itemId, req.userId],
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("Error deleting pantry item:", err);
+    return res.status(500).json({ message: "Error deleting pantry item" });
+  }
+});
+
 // Socket.io handlers
 io.on("connection", (socket) => {
   socket.on("register_user", (userId) => {
@@ -1549,8 +2565,10 @@ io.on("connection", (socket) => {
       productId,
     } = data;
     try {
-      const query = `INSERT INTO app.list_items (listId, itemName, price, storeName, quantity, addby, addat, updatedat, product_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
+      const query = `INSERT INTO app.list_items (listId, itemName, price, storeName, quantity, addby, addat, updatedat, product_id, sort_order)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
+        COALESCE((SELECT MAX(sort_order) FROM app.list_items WHERE listid = $1), 0) + 1
+      ) RETURNING *`;
 
       const values = [
         listId,
@@ -1567,29 +2585,82 @@ io.on("connection", (socket) => {
       const newItem = result.rows[0];
 
       io.to(String(listId)).emit("receive_item", newItem);
+
+      // Activity log & Gamification
+      logActivity(listId, addby, "item_added", `Added item: ${itemName}`);
+      awardPoints(addby, 5, "item_added");
+
+      // Push notification to other list members
+      try {
+        const members = await db.query(
+          "SELECT user_id FROM app.list_members WHERE list_id = $1 AND user_id != $2",
+          [listId, addby],
+        );
+        const memberIds = members.rows.map((m) => m.user_id);
+        if (memberIds.length > 0) {
+          const adderRes = await db.query("SELECT first_name FROM app2.users WHERE id = $1", [addby]);
+          const adderName = adderRes.rows[0]?.first_name || "מישהו";
+          sendPushNotifications(memberIds, "פריט חדש ברשימה", `${adderName} הוסיף ${itemName}`, { type: "item_added", listId });
+        }
+      } catch (pushErr) {
+        // Non-critical, don't break main flow
+      }
     } catch (e) {
       console.error("שגיאה בשמירה ל-DB:", e);
       console.error("Error details:", e.message);
     }
   });
   socket.on("toggle_item", async (data) => {
-    const { itemId, listId, isChecked } = data;
+    const { itemId, listId, isChecked, userId } = data;
     try {
       await db.query(
-        "UPDATE app.list_items SET is_checked = $1 WHERE id = $2",
-        [isChecked, itemId],
+        "UPDATE app.list_items SET is_checked = $1, checked_by = $2 WHERE id = $3",
+        [isChecked, isChecked ? (userId || null) : null, itemId],
       );
-      io.to(String(listId)).emit("item_status_changed", { itemId, isChecked });
+
+      // Get user name for who checked it
+      let checkedByName = null;
+      if (isChecked && userId) {
+        const userRes = await db.query(
+          "SELECT first_name FROM app2.users WHERE id = $1",
+          [userId],
+        );
+        checkedByName = userRes.rows[0]?.first_name || null;
+      }
+
+      io.to(String(listId)).emit("item_status_changed", { itemId, isChecked, checkedBy: isChecked ? userId : null, checkedByName });
+
+      // Activity log
+      logActivity(listId, userId || null, "item_toggled", `Item ${itemId} toggled to ${isChecked}`);
+
+      // Gamification: check if all items in list are checked (list completed)
+      if (isChecked && userId) {
+        try {
+          const allItems = await db.query(
+            "SELECT COUNT(*) as total, COUNT(CASE WHEN is_checked = true THEN 1 END) as checked FROM app.list_items WHERE listid = $1",
+            [listId],
+          );
+          const { total, checked } = allItems.rows[0];
+          if (parseInt(total) > 0 && parseInt(total) === parseInt(checked)) {
+            awardPoints(userId, 20, "list_completed");
+          }
+        } catch (gamErr) {
+          // Non-critical
+        }
+      }
     } catch (err) {
       console.error(err);
     }
   });
 
   socket.on("delete_item", async (data) => {
-    const { itemId, listId } = data;
+    const { itemId, listId, userId } = data;
     try {
       await db.query("DELETE FROM app.list_items WHERE id = $1", [itemId]);
       io.to(String(listId)).emit("item_deleted", { itemId });
+
+      // Activity log
+      logActivity(listId, userId || null, "item_deleted", `Deleted item ${itemId}`);
     } catch (err) {
       console.error("Error deleting item:", err);
     }
@@ -1617,6 +2688,10 @@ io.on("connection", (socket) => {
         paid_by_name,
         paid_at,
       });
+
+      // Activity log & Gamification
+      logActivity(listId, userId, "item_paid", `Paid for item ${itemId}`);
+      awardPoints(userId, 10, "item_paid");
     } catch (err) {
       console.error("Error marking paid:", err);
     }
@@ -1632,6 +2707,19 @@ io.on("connection", (socket) => {
       io.to(String(listId)).emit("item_unpaid", { itemId });
     } catch (err) {
       console.error("Error unmarking paid:", err);
+    }
+  });
+
+  socket.on("update_quantity", async (data) => {
+    const { itemId, listId, quantity } = data;
+    try {
+      await db.query(
+        "UPDATE app.list_items SET quantity = $1 WHERE id = $2",
+        [quantity, itemId],
+      );
+      io.to(String(listId)).emit("quantity_updated", { itemId, quantity });
+    } catch (err) {
+      console.error("Error updating quantity:", err);
     }
   });
 
@@ -1813,6 +2901,228 @@ io.on("connection", (socket) => {
       console.error("Error adding comment:", err);
     }
   });
+
+  // === CHAT PER LIST ===
+  socket.on("send_chat_message", async (data) => {
+    const { listId, userId, message } = data;
+    try {
+      const result = await db.query(
+        `INSERT INTO app.list_chat (list_id, user_id, message) VALUES ($1, $2, $3) RETURNING id, created_at`,
+        [listId, userId, message],
+      );
+      const userRes = await db.query(
+        "SELECT first_name FROM app2.users WHERE id = $1",
+        [userId],
+      );
+      const firstName = userRes.rows[0]?.first_name || "User";
+      io.to(String(listId)).emit("receive_chat_message", {
+        id: result.rows[0].id,
+        listId,
+        userId,
+        firstName,
+        message,
+        createdAt: result.rows[0].created_at,
+      });
+    } catch (err) {
+      console.error("Error sending chat message:", err);
+    }
+  });
+
+  // === SHOPPING ASSIGNMENT ===
+  socket.on("assign_item", async (data) => {
+    const { itemId, listId, assignedTo } = data;
+    try {
+      await db.query(
+        "UPDATE app.list_items SET assigned_to = $1 WHERE id = $2",
+        [assignedTo, itemId],
+      );
+      let assignedToName = null;
+      if (assignedTo) {
+        const userRes = await db.query(
+          "SELECT first_name FROM app2.users WHERE id = $1",
+          [assignedTo],
+        );
+        assignedToName = userRes.rows[0]?.first_name || null;
+      }
+      io.to(String(listId)).emit("item_assigned", {
+        itemId,
+        assignedTo,
+        assignedToName,
+      });
+    } catch (err) {
+      console.error("Error assigning item:", err);
+    }
+  });
+
+  // Reorder items
+  socket.on("reorder_items", async (data) => {
+    const { listId, items } = data;
+    if (!items || !Array.isArray(items)) return;
+    try {
+      for (const item of items) {
+        await db.query(
+          "UPDATE app.list_items SET sort_order = $1 WHERE id = $2 AND listid = $3",
+          [item.sortOrder, item.itemId, listId]
+        );
+      }
+      socket.to(String(listId)).emit("items_reordered", { items });
+    } catch (err) {
+      console.error("Error reordering items:", err);
+    }
+  });
+});
+
+// === CRON JOB: Recurring Lists ===
+// Runs daily at 8:00 AM to create lists from scheduled templates
+cron.schedule("0 8 * * *", async () => {
+  console.log("Running recurring lists cron job...");
+  try {
+    // Get all active schedules where next_run has passed
+    const { rows: dueSchedules } = await db.query(
+      `SELECT ts.id, ts.template_id, ts.user_id, ts.frequency,
+              lt.template_name
+       FROM app.template_schedules ts
+       JOIN app.list_templates lt ON lt.id = ts.template_id
+       WHERE ts.active = true AND ts.next_run <= NOW()`,
+    );
+
+    for (const schedule of dueSchedules) {
+      try {
+        // Get template items
+        const { rows: templateItems } = await db.query(
+          `SELECT item_name, quantity, note, sort_order
+           FROM app.template_items
+           WHERE template_id = $1
+           ORDER BY sort_order ASC`,
+          [schedule.template_id],
+        );
+
+        if (templateItems.length === 0) {
+          console.log(`Template ${schedule.template_id} has no items, skipping.`);
+          continue;
+        }
+
+        // Create a new list from the template
+        const listRes = await db.query(
+          `INSERT INTO app.list (list_name) VALUES ($1) RETURNING id`,
+          [schedule.template_name],
+        );
+        const newListId = listRes.rows[0].id;
+
+        // Add the user as admin of the new list
+        await db.query(
+          `INSERT INTO app.list_members (list_id, user_id, status) VALUES ($1, $2, 'admin')`,
+          [newListId, schedule.user_id],
+        );
+
+        // Add all template items to the new list
+        for (const item of templateItems) {
+          await db.query(
+            `INSERT INTO app.list_items (listId, itemName, quantity, addby, addat, updatedat)
+             VALUES ($1, $2, $3, $4, NOW(), NOW())`,
+            [newListId, item.item_name, item.quantity || 1, schedule.user_id],
+          );
+        }
+
+        // Calculate next_run based on frequency
+        let intervalExpression;
+        if (schedule.frequency === "weekly") {
+          intervalExpression = "7 days";
+        } else if (schedule.frequency === "biweekly") {
+          intervalExpression = "14 days";
+        } else {
+          intervalExpression = "1 month";
+        }
+
+        // Update next_run for this schedule
+        await db.query(
+          `UPDATE app.template_schedules SET next_run = NOW() + interval '${intervalExpression}' WHERE id = $1`,
+          [schedule.id],
+        );
+
+        console.log(`Created list "${schedule.template_name}" (ID: ${newListId}) from template ${schedule.template_id} for user ${schedule.user_id}`);
+      } catch (scheduleErr) {
+        console.error(`Error processing schedule ${schedule.id}:`, scheduleErr);
+      }
+    }
+
+    if (dueSchedules.length === 0) {
+      console.log("No recurring lists due at this time.");
+    } else {
+      console.log(`Processed ${dueSchedules.length} recurring list schedule(s).`);
+    }
+  } catch (err) {
+    console.error("Error in recurring lists cron job:", err);
+  }
+});
+
+// === CRON JOB: Pantry Expiration Notifications ===
+// Runs daily at 7:00 AM to notify users about items expiring within 2 days
+cron.schedule("0 7 * * *", async () => {
+  console.log("Running pantry expiration check cron job...");
+  try {
+    const result = await db.query(
+      `SELECT pi.id, pi.user_id, pi.item_name, pi.expiry_date, pi.quantity
+       FROM app.pantry_items pi
+       WHERE pi.expiry_date <= CURRENT_DATE + interval '2 days'
+         AND pi.expiry_date >= CURRENT_DATE`,
+    );
+
+    // Group by user
+    const userItems = {};
+    for (const row of result.rows) {
+      if (!userItems[row.user_id]) {
+        userItems[row.user_id] = [];
+      }
+      userItems[row.user_id].push(row);
+    }
+
+    for (const [userId, items] of Object.entries(userItems)) {
+      const itemNames = items.map((i) => i.item_name).join(", ");
+      await sendPushNotifications(
+        [parseInt(userId)],
+        "פריטים עומדים לפוג תוקף!",
+        `הפריטים הבאים עומדים לפוג: ${itemNames}`,
+        { type: "pantry_expiry" },
+      );
+    }
+
+    console.log(`Pantry expiration check: notified ${Object.keys(userItems).length} user(s).`);
+  } catch (err) {
+    console.error("Error in pantry expiration cron job:", err);
+  }
+});
+
+// === CRON JOB: Price Alert Notifications ===
+// Runs daily at 9:00 AM to check active price alerts against current prices
+cron.schedule("0 9 * * *", async () => {
+  console.log("Running price alerts cron job...");
+  try {
+    const result = await db.query(
+      `SELECT pa.id, pa.user_id, pa.item_id, pa.target_price,
+              i.name AS item_name,
+              MIN(p.price) AS current_price
+       FROM app.price_alerts pa
+       JOIN app.items i ON pa.item_id = i.id
+       LEFT JOIN app.prices p ON p.item_id = pa.item_id
+       WHERE pa.active = true
+       GROUP BY pa.id, pa.user_id, pa.item_id, pa.target_price, i.name
+       HAVING MIN(p.price) <= pa.target_price`,
+    );
+
+    for (const alert of result.rows) {
+      await sendPushNotifications(
+        [alert.user_id],
+        "התראת מחיר!",
+        `${alert.item_name} ירד ל-${alert.current_price} ₪ (יעד: ${alert.target_price} ₪)`,
+        { type: "price_alert", itemId: alert.item_id },
+      );
+    }
+
+    console.log(`Price alerts check: sent ${result.rows.length} notification(s).`);
+  } catch (err) {
+    console.error("Error in price alerts cron job:", err);
+  }
 });
 
 server.listen(port, () => {

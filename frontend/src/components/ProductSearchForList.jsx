@@ -94,13 +94,36 @@ const ProductSearchForList = ({ onSelect }) => {
               onMouseEnter={(e) => e.currentTarget.style.background = "rgba(79,70,229,0.04)"}
               onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
             >
-              <div style={{
-                width: "36px", height: "36px", borderRadius: "10px", flexShrink: 0,
-                background: "linear-gradient(135deg, rgba(79,70,229,0.08), rgba(6,182,212,0.06))",
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                <i className="bi bi-box-seam" style={{ fontSize: "0.9rem", color: "var(--sc-primary)" }}></i>
-              </div>
+              {item.image_url ? (
+                <img
+                  src={item.image_url}
+                  alt={item.item_name}
+                  style={{
+                    width: "36px",
+                    height: "36px",
+                    borderRadius: "10px",
+                    flexShrink: 0,
+                    objectFit: "contain",
+                    border: "1px solid var(--sc-border)",
+                    backgroundColor: "#fff",
+                  }}
+                  onError={(e) => {
+                    e.target.style.display = "none";
+                    const placeholder = document.createElement("div");
+                    placeholder.style = "width:36px;height:36px;border-radius:10px;flex-shrink:0;background:linear-gradient(135deg,rgba(79,70,229,0.08),rgba(6,182,212,0.06));display:flex;align-items:center;justify-content:center";
+                    placeholder.innerHTML = '<i class="bi bi-box-seam" style="font-size:0.9rem;color:var(--sc-primary)"></i>';
+                    e.target.parentNode.insertBefore(placeholder, e.target);
+                  }}
+                />
+              ) : (
+                <div style={{
+                  width: "36px", height: "36px", borderRadius: "10px", flexShrink: 0,
+                  background: "linear-gradient(135deg, rgba(79,70,229,0.08), rgba(6,182,212,0.06))",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <i className="bi bi-box-seam" style={{ fontSize: "0.9rem", color: "var(--sc-primary)" }}></i>
+                </div>
+              )}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="fw-bold" style={{ fontSize: "0.85rem", lineHeight: 1.3 }}>
                   {item.item_name}
