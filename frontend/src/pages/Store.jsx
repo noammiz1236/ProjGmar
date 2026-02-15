@@ -1,4 +1,10 @@
-import React, { useState, useRef, useContext } from "react";
+import React, {
+  useState,
+  useRef,
+  useContext,
+  useEffect,
+  useCallback,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 import api from "../api";
@@ -35,13 +41,12 @@ const Store = () => {
     try {
       const params = new URLSearchParams({ limit, offset: currentOffset, q });
       const response = await api.get(`/api/search?${params.toString()}`);
-      const newProducts = Array.isArray(response.data) ? response.data : [];
-      console.log(newProducts);
+      const data = response.data;
+      const newProducts = Array.isArray(data.rows) ? data.rows : [];
       if (reset) setProducts(newProducts);
       else setProducts((prev) => [...prev, ...newProducts]);
-      offsetRef.current =
-        response.data.nextOffset || currentOffset + newProducts.length;
-      setHasMore(response.data.hasMore ?? false);
+      offsetRef.current = data.nextOffset ?? currentOffset + newProducts.length;
+      setHasMore(data.hasMore ?? false);
     } catch (err) {
       console.error("Error fetching products:", err);
       setHasMore(false);
@@ -68,12 +73,27 @@ const Store = () => {
     }, 400);
   };
 
-  const loadMore = () => {
+  const loadMore = useCallback(() => {
     if (!loading && hasMore) {
       setLoading(true);
       fetchProducts(false);
     }
-  };
+  }, [loading, hasMore]);
+
+  // IntersectionObserver for infinite scroll
+  const sentinelRef = useRef(null);
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) loadMore();
+      },
+      { threshold: 0.1 },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [loadMore]);
 
   const handleAddToList = async (product) => {
     if (!user) return;
@@ -263,7 +283,7 @@ const Store = () => {
                       <i className="bi bi-box-seam"></i>
                     </div>
                     <div className="sc-product-info">
-                      <p className="sc-product-name">{product.name}</p>
+                      <p className="sc-product-name">{product.item_name}</p>
                       {product.chain_name && (
                         <div className="sc-product-chain">
                           <i className="bi bi-shop me-1"></i>
@@ -290,23 +310,14 @@ const Store = () => {
               ))}
             </div>
 
-            {hasMore && (
-              <div className="text-center mt-4">
-                <button
-                  className="sc-btn sc-btn-ghost"
-                  onClick={loadMore}
-                  disabled={loading}
-                  style={{ padding: "10px 28px" }}
-                >
-                  {loading ? (
-                    <span className="spinner-border spinner-border-sm"></span>
-                  ) : (
-                    <>
-                      <i className="bi bi-arrow-down-circle me-2"></i>הצג עוד
-                      תוצאות
-                    </>
-                  )}
-                </button>
+            {/* Infinite scroll sentinel */}
+            <div ref={sentinelRef} style={{ height: "1px" }} />
+            {loading && products.length > 0 && (
+              <div className="text-center py-3">
+                <div
+                  className="sc-spinner"
+                  style={{ margin: "0 auto", width: "24px", height: "24px" }}
+                ></div>
               </div>
             )}
 
