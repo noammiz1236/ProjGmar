@@ -123,33 +123,45 @@ db.query("SELECT NOW()", (err, res) => {
   }
 });
 
+// Ensure popularity_points column exists on app.items
+// db.query(
+//   `ALTER TABLE app.items ADD COLUMN IF NOT EXISTS popularity_points INTEGER DEFAULT 0`,
+// ).catch((e) => console.error("popularity_points column check:", e.message));
+
 app.get("/api/search", async (req, res) => {
   const search = req.query.q;
   if (!search) return res.json({ rows: [], hasMore: false, nextOffset: 0 });
 
   const limit = Math.min(parseInt(req.query.limit) || 20, 100);
   const offset = Math.max(parseInt(req.query.offset) || 0, 0);
-  const searchTerm = `%${search}%`;
+  const containsTerm = `%${search}%`;
+  const startsWithTerm = `${search}%`;
 
   try {
     const reply = await db.query(
-      `SELECT DISTINCT ON (i.id)
-       i.id as item_id,
-       i.name as item_name,
-       i.barcode,
-       i.item_code,
-       p.price,
-       c.id as chain_id,
-       c.name as chain_name,
-       b.branch_name
-       FROM app.items i
-       LEFT JOIN app.prices p ON p.item_id = i.id
-       LEFT JOIN app.branches b ON b.id = p.branch_id
-       LEFT JOIN app.chains c ON c.id = b.chain_id
-       WHERE i.name ILIKE $1
-       ORDER BY i.id, p.price DESC NULLS LAST
-       LIMIT $2 OFFSET $3`,
-      [searchTerm, limit + 1, offset],
+      `SELECT * FROM (
+         SELECT DISTINCT ON (i.id)
+         i.id as item_id,
+         i.name as item_name,
+         i.barcode,
+         i.item_code,
+         p.price,
+         c.id as chain_id,
+         c.name as chain_name,
+         b.branch_name,
+         COALESCE(i.popularity_points, 0) as popularity_points
+         FROM app.items i
+         LEFT JOIN app.prices p ON p.item_id = i.id
+         LEFT JOIN app.branches b ON b.id = p.branch_id
+         LEFT JOIN app.chains c ON c.id = b.chain_id
+         WHERE i.name ILIKE $1
+         ORDER BY i.id, p.price DESC NULLS LAST
+       ) sub
+       ORDER BY CASE WHEN sub.item_name ILIKE $2 THEN 0 ELSE 1 END,
+                sub.popularity_points DESC,
+                sub.item_name
+       LIMIT $3 OFFSET $4`,
+      [containsTerm, startsWithTerm, limit + 1, offset],
     );
 
     const hasMore = reply.rows.length > limit;
@@ -160,6 +172,41 @@ app.get("/api/search", async (req, res) => {
   } catch (e) {
     console.error("Search error:", e.message);
     return res.status(500).json({ rows: [], hasMore: false, nextOffset: 0 });
+  }
+});
+
+// GET /api/products/:id — single product detail
+app.get("/api/products/:id", async (req, res) => {
+  const productId = req.params.id;
+  try {
+    const reply = await db.query(
+      `SELECT DISTINCT ON (i.id)
+       i.id as item_id,
+       i.name as item_name,
+       i.barcode,
+       i.item_code,
+       p.price,
+       c.id as chain_id,
+       c.name as chain_name,
+       b.branch_name,
+       COALESCE(i.popularity_points, 0) as popularity_points
+       FROM app.items i
+       LEFT JOIN app.prices p ON p.item_id = i.id
+       LEFT JOIN app.branches b ON b.id = p.branch_id
+       LEFT JOIN app.chains c ON c.id = b.chain_id
+       WHERE i.id = $1
+       ORDER BY i.id, p.price ASC NULLS LAST`,
+      [productId],
+    );
+
+    if (reply.rows.length === 0) {
+      return res.status(404).json({ message: "Product not found" });
+    }
+
+    return res.json({ product: reply.rows[0] });
+  } catch (e) {
+    console.error("Product fetch error:", e.message);
+    return res.status(500).json({ message: "Error fetching product" });
   }
 });
 
@@ -1113,6 +1160,14 @@ app.post("/api/lists/:id/items", authenticateToken, async (req, res) => {
 
     const newItem = result.rows[0];
 
+    // Increment popularity_points for the linked product
+    if (productId) {
+      db.query(
+        `UPDATE app.items SET popularity_points = COALESCE(popularity_points, 0) + 1 WHERE id = $1`,
+        [productId],
+      ).catch((e) => console.error("Error updating popularity:", e.message));
+    }
+
     // Emit to socket.io room for real-time updates
     io.to(String(listId)).emit("receive_item", newItem);
 
@@ -1357,17 +1412,24 @@ app.post("/api/templates", authenticateToken, async (req, res) => {
     const templateId = templateResult.rows[0].id;
 
     // Copy items from list to template
-    const items = await db.query(
-      "SELECT itemName, quantity, note FROM app.list_items WHERE listId = $1 ORDER BY id",
+    const itemsRes = await db.query(
+      "SELECT itemName, quantity, note, product_id FROM app.list_items WHERE listId = $1 ORDER BY id",
       [listId],
     );
 
-    for (let i = 0; i < items.rows.length; i++) {
-      const item = items.rows[i];
+    for (let i = 0; i < itemsRes.rows.length; i++) {
+      const item = itemsRes.rows[i];
       await db.query(
-        `INSERT INTO app.template_items (template_id, item_name, quantity, note, sort_order)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [templateId, item.itemname, item.quantity || 1, item.note, i],
+        `INSERT INTO app.template_items (template_id, item_name, quantity, note, sort_order, product_id)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          templateId,
+          item.itemname,
+          item.quantity || 1,
+          item.note,
+          i,
+          item.product_id || null,
+        ],
       );
     }
 
@@ -1412,16 +1474,33 @@ app.post("/api/templates/:id/apply", authenticateToken, async (req, res) => {
 
     // Copy template items to new list
     const items = await db.query(
-      "SELECT item_name, quantity, note FROM app.template_items WHERE template_id = $1 ORDER BY sort_order",
+      "SELECT item_name, quantity, note, product_id FROM app.template_items WHERE template_id = $1 ORDER BY sort_order",
       [templateId],
     );
 
     for (const item of items.rows) {
       await db.query(
-        `INSERT INTO app.list_items (listId, itemName, quantity, note, addby, addat, updatedat)
-         VALUES ($1, $2, $3, $4, $5, NOW(), NOW())`,
-        [newListId, item.item_name, item.quantity || 1, item.note, req.userId],
+        `INSERT INTO app.list_items (listId, itemName, quantity, note, addby, addat, updatedat, product_id)
+         VALUES ($1, $2, $3, $4, $5, NOW(), NOW(), $6)`,
+        [
+          newListId,
+          item.item_name,
+          item.quantity || 1,
+          item.note,
+          req.userId,
+          item.product_id || null,
+        ],
       );
+
+      // Increment points for template items
+      if (item.product_id) {
+        db.query(
+          `UPDATE app.items SET popularity_points = COALESCE(popularity_points, 0) + 1 WHERE id = $1`,
+          [item.product_id],
+        ).catch((e) =>
+          console.error("Error updating popularity from template:", e.message),
+        );
+      }
     }
 
     return res.json({
@@ -1632,6 +1711,16 @@ app.post(
 
         // Emit to list room so all members see the new item
         io.to(String(request.list_id)).emit("receive_item", itemResult.rows[0]);
+
+        // Increment popularity_points for approved request
+        if (request.product_id) {
+          db.query(
+            `UPDATE app.items SET popularity_points = COALESCE(popularity_points, 0) + 1 WHERE id = $1`,
+            [request.product_id],
+          ).catch((e) =>
+            console.error("Error updating popularity from request:", e.message),
+          );
+        }
       }
 
       // Notify the child that their request was resolved
@@ -1715,6 +1804,16 @@ io.on("connection", (socket) => {
       ];
       const result = await db.query(query, values);
       const newItem = result.rows[0];
+
+      // Increment popularity_points for socket add
+      if (productId) {
+        db.query(
+          `UPDATE app.items SET popularity_points = COALESCE(popularity_points, 0) + 1 WHERE id = $1`,
+          [productId],
+        ).catch((e) =>
+          console.error("Error updating popularity from socket:", e.message),
+        );
+      }
 
       io.to(String(listId)).emit("receive_item", newItem);
     } catch (e) {

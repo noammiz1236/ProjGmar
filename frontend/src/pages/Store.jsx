@@ -267,14 +267,14 @@ const Store = () => {
             <div className="d-flex flex-column gap-3">
               {products.map((product, index) => (
                 <div
-                  key={`${product.id}-${product.chain_id}-${index}`}
+                  key={`${product.item_id}-${product.chain_id}-${index}`}
                   className="sc-product-row"
                 >
                   <div
                     className="d-flex align-items-center gap-3 flex-grow-1"
                     style={{ cursor: "pointer", minWidth: 0 }}
                     onClick={() =>
-                      navigate(`/product/${product.id}`, {
+                      navigate(`/product/${product.item_id}`, {
                         state: { product },
                       })
                     }
@@ -283,7 +283,33 @@ const Store = () => {
                       <i className="bi bi-box-seam"></i>
                     </div>
                     <div className="sc-product-info">
-                      <p className="sc-product-name">{product.item_name}</p>
+                      <p className="sc-product-name">
+                        {product.item_name}
+                        {product.popularity_points > 0 && (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "3px",
+                              marginRight: "6px",
+                              padding: "2px 7px",
+                              borderRadius: "10px",
+                              background:
+                                "linear-gradient(135deg, rgba(251,146,60,0.12), rgba(251,113,133,0.12))",
+                              color: "#f97316",
+                              fontSize: "0.7rem",
+                              fontWeight: 600,
+                              verticalAlign: "middle",
+                            }}
+                          >
+                            <i
+                              className="bi bi-fire"
+                              style={{ fontSize: "0.65rem" }}
+                            ></i>
+                            {product.popularity_points}
+                          </span>
+                        )}
+                      </p>
                       {product.chain_name && (
                         <div className="sc-product-chain">
                           <i className="bi bi-shop me-1"></i>

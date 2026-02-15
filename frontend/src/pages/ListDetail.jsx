@@ -703,6 +703,30 @@ const ListDetail = () => {
                           style={{ fontSize: "0.85rem", lineHeight: 1.3 }}
                         >
                           {item.item_name}
+                          {item.popularity_points > 0 && (
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "3px",
+                                marginRight: "6px",
+                                padding: "2px 6px",
+                                borderRadius: "10px",
+                                background:
+                                  "linear-gradient(135deg, rgba(251,146,60,0.12), rgba(251,113,133,0.12))",
+                                color: "#f97316",
+                                fontSize: "0.65rem",
+                                fontWeight: 600,
+                                verticalAlign: "middle",
+                              }}
+                            >
+                              <i
+                                className="bi bi-fire"
+                                style={{ fontSize: "0.6rem" }}
+                              ></i>
+                              {item.popularity_points}
+                            </span>
+                          )}
                         </div>
                         {item.chain_name && (
                           <small
