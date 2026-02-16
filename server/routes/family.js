@@ -78,10 +78,10 @@ router.get("/debug-user", authenticateToken, async (req, res) => {
       `SELECT id, first_name, username FROM app2.users WHERE parent_id = $1`,
       [req.userId]
     );
-    return res.json({ 
+    return res.json({
       currentUser: rows[0],
       userId: req.userId,
-      children: children.rows 
+      children: children.rows
     });
   } catch (err) {
     return res.status(500).json({ error: err.message });

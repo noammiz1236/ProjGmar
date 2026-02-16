@@ -168,7 +168,7 @@ const ListDetail = () => {
 
     if (isLinkedChild) {
       try {
-        await api.post("/api/kid-requests", {
+        await api.post("/api/family/kid-requests", {
           listId: parseInt(listId),
           itemName: selectedProduct.item_name,
           price: selectedProduct.price || null,
@@ -607,8 +607,8 @@ const ListDetail = () => {
                         transition: "background 0.15s ease",
                       }}
                       onMouseEnter={(e) =>
-                        (e.currentTarget.style.background =
-                          "rgba(79,70,229,0.04)")
+                      (e.currentTarget.style.background =
+                        "rgba(79,70,229,0.04)")
                       }
                       onMouseLeave={(e) =>
                         (e.currentTarget.style.background = "transparent")

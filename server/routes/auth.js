@@ -235,10 +235,6 @@ router.post("/login", authLimiter, loginValidator, async (req, res) => {
   const { email, username, password } = req.body;
   const db = req.app.locals.db;
 
-  if ((!email && !username) || !password) {
-    return res.status(400).json({ message: "Email/username and password are required" });
-  }
-
   try {
     let results;
     if (email) {

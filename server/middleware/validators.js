@@ -4,9 +4,9 @@ import { body, param, query, validationResult } from 'express-validator';
 const validate = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    return res.status(400).json({ 
+    return res.status(400).json({
       success: false,
-      errors: errors.array() 
+      errors: errors.array()
     });
   }
   next();
@@ -21,8 +21,16 @@ const registerValidator = [
 ];
 
 const loginValidator = [
-  body('email').isEmail().normalizeEmail(),
-  body('password').notEmpty(),
+  body('password').notEmpty().withMessage('Password is required'),
+  (req, res, next) => {
+    if (!req.body.email && !req.body.username) {
+      return res.status(400).json({
+        success: false,
+        errors: [{ msg: 'Email or username is required', param: 'identifier' }]
+      });
+    }
+    next();
+  },
   validate
 ];
 

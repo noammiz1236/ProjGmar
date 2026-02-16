@@ -45,7 +45,7 @@ db.query("SELECT NOW()", (err, res) => {
 });
 
 // Middleware
-app.use(morgan("dev"));
+// app.use(morgan("dev"));
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));

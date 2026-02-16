@@ -61,7 +61,7 @@ router.get("/search", async (req, res) => {
        i.barcode,
        i.item_code,
        i.image_url,
-       p.price,
+       p.price ,
        c.id as chain_id,
        c.name as chain_name,
        b.branch_name
@@ -222,7 +222,7 @@ router.post("/receipt/scan", authenticateToken, async (req, res) => {
 
     // Run OCR with Tesseract (Hebrew + English)
     const result = await Tesseract.recognize(imageBuffer, "heb+eng", {
-      logger: () => {},
+      logger: () => { },
     });
 
     const text = result.data.text;
