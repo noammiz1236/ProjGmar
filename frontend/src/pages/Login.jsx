@@ -24,6 +24,10 @@ const Login = () => {
       setError("יש להזין סיסמה");
       return;
     }
+    if (password.length < 8) {
+      setError("סיסמה שגויה");
+      return;
+    }
 
     setLoading(true);
     try {
@@ -49,7 +53,10 @@ const Login = () => {
       <div className="sc-auth-card page-fade-in">
         <div className="text-center mb-4">
           <Link to="/" style={{ textDecoration: "none" }}>
-            <span className="sc-text-gradient" style={{ fontSize: "2rem", fontWeight: 800 }}>
+            <span
+              className="sc-text-gradient"
+              style={{ fontSize: "2rem", fontWeight: 800 }}
+            >
               <i className="bi bi-cart3"></i> SmartCart
             </span>
           </Link>
@@ -59,14 +66,20 @@ const Login = () => {
         <p className="sc-auth-subtitle">התחבר כדי לנהל את הרשימות שלך</p>
 
         {error && (
-          <div className="alert alert-danger py-2 text-center" style={{ borderRadius: "10px", fontSize: "0.9rem" }}>
+          <div
+            className="alert alert-danger py-2 text-center"
+            style={{ borderRadius: "10px", fontSize: "0.9rem" }}
+          >
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit}>
           <div className="mb-3">
-            <label className="form-label fw-semibold" style={{ fontSize: "0.9rem" }}>
+            <label
+              className="form-label fw-semibold"
+              style={{ fontSize: "0.9rem" }}
+            >
               אימייל או שם משתמש
             </label>
             <input
@@ -82,7 +95,10 @@ const Login = () => {
 
           <div className="mb-4">
             <div className="d-flex justify-content-between align-items-center">
-              <label className="form-label fw-semibold mb-0" style={{ fontSize: "0.9rem" }}>
+              <label
+                className="form-label fw-semibold mb-0"
+                style={{ fontSize: "0.9rem" }}
+              >
                 סיסמה
               </label>
               <Link
@@ -108,14 +124,22 @@ const Login = () => {
             disabled={loading}
             style={{ padding: "12px", fontSize: "1rem" }}
           >
-            {loading && <span className="spinner-border spinner-border-sm me-2"></span>}
+            {loading && (
+              <span className="spinner-border spinner-border-sm me-2"></span>
+            )}
             {loading ? "מתחבר..." : "התחברות"}
           </button>
         </form>
 
-        <p className="text-center mt-4 mb-0" style={{ fontSize: "0.9rem", color: "var(--sc-text-muted)" }}>
+        <p
+          className="text-center mt-4 mb-0"
+          style={{ fontSize: "0.9rem", color: "var(--sc-text-muted)" }}
+        >
           אין לך חשבון?{" "}
-          <Link to="/register" style={{ color: "var(--sc-primary)", fontWeight: 600 }}>
+          <Link
+            to="/register"
+            style={{ color: "var(--sc-primary)", fontWeight: 600 }}
+          >
             הרשם כאן
           </Link>
         </p>
