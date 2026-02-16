@@ -374,7 +374,7 @@ const Store = () => {
                       </div>
                     )}
                     <div className="sc-product-info">
-                      <p className="sc-product-name">{product.item_name}</p>
+                      <p className="sc-product-name">{product.name}</p>
                       {product.chain_name && (
                         <div className="sc-product-chain">
                           <i className="bi bi-shop me-1"></i>
