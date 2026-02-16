@@ -8,15 +8,11 @@ import { Server } from "socket.io";
 import pg from "pg";
 import cron from "node-cron";
 
-// Import middleware
-import { apiLimiter, authLimiter, searchLimiter } from "./middleware/rateLimiter.js";
-import { logger, requestLogger, errorLogger } from "./utils/logger.js";
-
 // Import routes
 import authRoutes from "./routes/auth.js";
 import listsRoutes from "./routes/lists.js";
 import familyRoutes from "./routes/family.js";
-import productsRoutes from "./routes/simplified_products.js";
+import productsRoutes from "./routes/products.js";
 
 config();
 
@@ -27,7 +23,7 @@ const server = http.createServer(app);
 // Socket.io setup
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:5173", "http://100.115.197.11:5173"],
+    origin: process.env.HOST_ALLOWED || "http://localhost:5173",
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -42,15 +38,14 @@ const db = new Pool({
 // Test database connection
 db.query("SELECT NOW()", (err, res) => {
   if (err) {
-    logger.error("Database connection error", { error: err.message });
+    console.error("Database connection error:", err.message);
   } else {
-    logger.info("✅ PostgreSQL connected (israel_shopping_db)");
+    console.log("✅ PostgreSQL connected (israel_shopping_db)");
   }
 });
 
 // Middleware
-app.use(requestLogger); // Structured logging
-app.use(morgan("dev")); // Keep morgan for now (can remove later)
+app.use(morgan("dev"));
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
@@ -61,14 +56,11 @@ app.use(
   })
 );
 
-// Apply general rate limiting to all API routes
-app.use("/api", apiLimiter);
-
 // Make db and io available to routes
 app.locals.db = db;
 app.locals.io = io;
 
-// Initialize core database tables
+// Initialize database tables (if needed)
 async function initializeTables() {
   const queries = [
     `CREATE TABLE IF NOT EXISTS app.template_schedules (
@@ -113,17 +105,30 @@ async function initializeTables() {
       active BOOLEAN DEFAULT true,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )`,
+    `CREATE TABLE IF NOT EXISTS app.user_points (
+      id SERIAL PRIMARY KEY,
+      user_id INT UNIQUE NOT NULL,
+      points INT DEFAULT 0,
+      streak_days INT DEFAULT 0,
+      last_active DATE
+    )`,
+    `CREATE TABLE IF NOT EXISTS app.user_badges (
+      id SERIAL PRIMARY KEY,
+      user_id INT NOT NULL,
+      badge_name VARCHAR(50) NOT NULL,
+      earned_at TIMESTAMPTZ DEFAULT NOW()
+    )`,
   ];
 
   for (const query of queries) {
     try {
       await db.query(query);
     } catch (err) {
-      logger.error("Table creation error", { error: err.message });
+      console.error("Table creation error:", err.message);
     }
   }
 
-  logger.info("✅ Database tables initialized");
+  console.log("✅ Database tables initialized");
 }
 
 initializeTables();
@@ -171,6 +176,70 @@ async function sendPushNotifications(userIds, title, body, data = {}) {
   }
 }
 
+// Gamification helpers
+async function awardPoints(userId, amount, reason) {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+
+    const existing = await db.query(
+      `SELECT points, streak_days, last_active FROM app.user_points WHERE user_id = $1`,
+      [userId]
+    );
+
+    if (existing.rows.length === 0) {
+      await db.query(
+        `INSERT INTO app.user_points (user_id, points, streak_days, last_active) VALUES ($1, $2, 1, $3)`,
+        [userId, amount, today]
+      );
+    } else {
+      const row = existing.rows[0];
+      let newStreak = row.streak_days;
+      if (row.last_active) {
+        const lastActive = new Date(row.last_active);
+        const todayDate = new Date(today);
+        const diffDays = Math.floor((todayDate - lastActive) / (1000 * 60 * 60 * 24));
+        if (diffDays === 1) {
+          newStreak = row.streak_days + 1;
+        } else if (diffDays > 1) {
+          newStreak = 1;
+        }
+      }
+      await db.query(
+        `UPDATE app.user_points SET points = points + $1, streak_days = $2, last_active = $3 WHERE user_id = $4`,
+        [amount, newStreak, today, userId]
+      );
+    }
+
+    // Badge logic (simplified - can be extracted to its own module)
+    const updatedPoints = await db.query(
+      `SELECT points, streak_days FROM app.user_points WHERE user_id = $1`,
+      [userId]
+    );
+    const currentPoints = updatedPoints.rows[0];
+
+    if (reason === "item_added") {
+      const itemCount = await db.query(
+        `SELECT COUNT(*) as cnt FROM app.list_items WHERE addby = $1`,
+        [userId]
+      );
+      if (parseInt(itemCount.rows[0].cnt) === 1) {
+        const hasBadge = await db.query(
+          `SELECT id FROM app.user_badges WHERE user_id = $1 AND badge_name = 'first_item'`,
+          [userId]
+        );
+        if (hasBadge.rows.length === 0) {
+          await db.query(
+            `INSERT INTO app.user_badges (user_id, badge_name) VALUES ($1, 'first_item')`,
+            [userId]
+          );
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Error awarding points:", err);
+  }
+}
+
 // Activity log helper
 async function logActivity(listId, userId, action, details) {
   try {
@@ -211,7 +280,9 @@ io.on("connection", (socket) => {
       const newItem = result.rows[0];
 
       io.to(String(listId)).emit("receive_item", newItem);
+
       logActivity(listId, addby, "item_added", `Added item: ${itemName}`);
+      awardPoints(addby, 5, "item_added");
 
       // Notify other members
       try {
@@ -287,7 +358,9 @@ io.on("connection", (socket) => {
       const paid_by_name = userResult.rows[0]?.first_name;
 
       io.to(String(listId)).emit("item_paid", { itemId, paid_by: userId, paid_by_name, paid_at });
+
       logActivity(listId, userId, "item_paid", `Paid for item ${itemId}`);
+      awardPoints(userId, 10, "item_paid");
     } catch (err) {
       console.error("Mark paid error:", err);
     }
@@ -522,156 +595,6 @@ cron.schedule("0 8 * * *", async () => {
   }
 });
 
-// Cron job: Daily price snapshot (runs at 2 AM every day)
-cron.schedule("0 2 * * *", async () => {
-  console.log("[Price Snapshot] Running daily price snapshot...");
-  try {
-    const result = await db.query(`
-      INSERT INTO app.price_history (product_id, chain_id, price, recorded_at)
-      SELECT 
-        p.item_id as product_id,
-        b.chain_id,
-        p.price,
-        NOW() as recorded_at
-      FROM app.prices p
-      JOIN app.branches b ON b.id = p.branch_id
-      WHERE p.price IS NOT NULL
-      ON CONFLICT DO NOTHING
-      RETURNING id
-    `);
-    
-    const count = result.rowCount || 0;
-    console.log(`[Price Snapshot] ✅ Inserted ${count} price records`);
-
-    // Clean up old records (keep last 90 days)
-    const cleanupResult = await db.query(`
-      DELETE FROM app.price_history
-      WHERE recorded_at < NOW() - INTERVAL '90 days'
-      RETURNING id
-    `);
-
-    const cleaned = cleanupResult.rowCount || 0;
-    console.log(`[Price Snapshot] 🧹 Cleaned up ${cleaned} old records (>90 days)`);
-  } catch (err) {
-    console.error("[Price Snapshot] ❌ Error:", err.message);
-  }
-});
-
-// Push token management
-app.post("/api/push-token", async (req, res) => {
-  const { token, platform } = req.body;
-  if (!token) return res.status(400).json({ message: "Token required" });
-  try {
-    const userId = req.userId; // Should use authenticateToken middleware
-    await db.query(
-      `INSERT INTO app.push_tokens (user_id, token, platform)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (token) DO UPDATE SET user_id = $1, platform = $3`,
-      [userId, token, platform || "android"]
-    );
-    return res.json({ success: true });
-  } catch (err) {
-    console.error("Error saving push token:", err);
-    return res.status(500).json({ message: "Error saving token" });
-  }
-});
-
-app.delete("/api/push-token", async (req, res) => {
-  const { token } = req.body;
-  if (!token) return res.status(400).json({ message: "Token required" });
-  try {
-    const userId = req.userId; // Should use authenticateToken middleware
-    await db.query("DELETE FROM app.push_tokens WHERE token = $1 AND user_id = $2", [token, userId]);
-    return res.json({ success: true });
-  } catch (err) {
-    console.error("Error removing push token:", err);
-    return res.status(500).json({ message: "Error removing token" });
-  }
-});
-
-// Price alerts endpoints
-app.post("/api/price-alerts", async (req, res) => {
-  const { itemId, targetPrice } = req.body;
-  const userId = req.userId; // Should use authenticateToken middleware
-  
-  if (!itemId || !targetPrice) {
-    return res.status(400).json({ message: "itemId and targetPrice are required" });
-  }
-  try {
-    const result = await db.query(
-      `INSERT INTO app.price_alerts (user_id, item_id, target_price) VALUES ($1, $2, $3) RETURNING *`,
-      [userId, itemId, targetPrice]
-    );
-    return res.status(201).json({ alert: result.rows[0] });
-  } catch (err) {
-    console.error("Error creating price alert:", err);
-    return res.status(500).json({ message: "Error creating price alert" });
-  }
-});
-
-app.get("/api/price-alerts", async (req, res) => {
-  const userId = req.userId; // Should use authenticateToken middleware
-  
-  try {
-    const result = await db.query(
-      `SELECT pa.id, pa.item_id, pa.target_price, pa.created_at, i.name AS item_name
-       FROM app.price_alerts pa
-       JOIN app.items i ON pa.item_id = i.id
-       WHERE pa.user_id = $1 AND pa.active = true
-       ORDER BY pa.created_at DESC`,
-      [userId]
-    );
-    return res.json({ alerts: result.rows });
-  } catch (err) {
-    console.error("Error fetching price alerts:", err);
-    return res.status(500).json({ message: "Error fetching price alerts" });
-  }
-});
-
-app.delete("/api/price-alerts/:id", async (req, res) => {
-  const alertId = req.params.id;
-  const userId = req.userId; // Should use authenticateToken middleware
-  
-  try {
-    await db.query(
-      `UPDATE app.price_alerts SET active = false WHERE id = $1 AND user_id = $2`,
-      [alertId, userId]
-    );
-    return res.json({ success: true });
-  } catch (err) {
-    console.error("Error deactivating price alert:", err);
-    return res.status(500).json({ message: "Error deactivating price alert" });
-  }
-});
-
-// Activity feed
-app.get("/api/activity/feed", async (req, res) => {
-  const userId = req.userId; // Should use authenticateToken middleware
-  const { action, from, to, limit = 50, offset = 0 } = req.query;
-  
-  try {
-    const result = await db.query(
-      `SELECT al.id, al.list_id, al.user_id, al.action, al.details, al.created_at,
-              u.first_name AS user_name,
-              l.list_name
-       FROM app.activity_log al
-       JOIN app.list_members lm ON lm.list_id = al.list_id AND lm.user_id = $1
-       LEFT JOIN app2.users u ON al.user_id = u.id
-       LEFT JOIN app.list l ON al.list_id = l.id
-       WHERE ($2::VARCHAR IS NULL OR al.action = $2)
-         AND ($3::TIMESTAMPTZ IS NULL OR al.created_at >= $3::TIMESTAMPTZ)
-         AND ($4::TIMESTAMPTZ IS NULL OR al.created_at <= $4::TIMESTAMPTZ)
-       ORDER BY al.created_at DESC
-       LIMIT $5 OFFSET $6`,
-      [userId, action || null, from || null, to || null, parseInt(limit), parseInt(offset)]
-    );
-    return res.json({ activities: result.rows });
-  } catch (err) {
-    console.error("Error fetching activity feed:", err);
-    return res.status(500).json({ message: "Error fetching activity feed" });
-  }
-});
-
 // Health check endpoint
 app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
@@ -682,21 +605,14 @@ app.use((req, res) => {
   res.status(404).json({ message: "Route not found" });
 });
 
-// Error logging and handling
-app.use(errorLogger);
+// Error handler
 app.use((err, req, res, next) => {
-  const status = err.status || 500;
-  res.status(status).json({ 
-    success: false,
-    message: err.message || "Internal server error",
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
-  });
+  console.error("Error:", err);
+  res.status(500).json({ message: "Internal server error" });
 });
 
 // Start server
 server.listen(port, () => {
-  logger.info(`🚀 SmartCart server running on port ${port}`);
-  logger.info(`📡 Socket.io ready for real-time updates`);
-  logger.info(`✨ Enhanced version with rate limiting, validation & structured logging`);
-  logger.info(`🔒 Security: Rate limiting active on all API endpoints`);
+  console.log(`🚀 SmartCart server running on port ${port}`);
+  console.log(`📡 Socket.io ready for real-time updates`);
 });

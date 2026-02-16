@@ -2,6 +2,7 @@ import React, { useState, useEffect, useContext } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 import api from "../api";
+import PriceHistoryChart from "../components/PriceHistoryChart";
 
 const ProductPage = () => {
   const { id } = useParams();
@@ -196,6 +197,19 @@ const ProductPage = () => {
             </div>
           </div>
         </div>
+
+        {/* Price History Chart */}
+        {user && (
+          <div className="row mt-4">
+            <div className="col-12">
+              <h5 className="fw-bold mb-3">
+                <i className="bi bi-graph-up me-2" style={{ color: 'var(--sc-primary)' }}></i>
+                היסטוריית מחירים
+              </h5>
+              <PriceHistoryChart productId={id} />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* List selection modal */}

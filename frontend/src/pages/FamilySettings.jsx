@@ -13,9 +13,11 @@ const FamilySettings = () => {
     const fetchChildren = async () => {
       try {
         const { data } = await api.get("/api/family/children");
+        console.log('Children API response:', data);
         setChildren(data.children);
       } catch (err) {
-        console.error(err);
+        console.error('Error fetching children:', err);
+        console.error('Error response:', err.response?.data);
       } finally {
         setLoading(false);
       }

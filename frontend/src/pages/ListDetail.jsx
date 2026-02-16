@@ -227,7 +227,7 @@ const ListDetail = () => {
     setShowChildrenModal(true);
     setChildrenLoading(true);
     try {
-      const { data } = await api.get(`/api/lists/${listId}/children`);
+      const { data } = await api.get(`/api/family/lists/${listId}/children`);
       setChildrenList(data.children);
     } catch (err) {
       console.error(err);
@@ -239,9 +239,9 @@ const ListDetail = () => {
   const handleToggleChild = async (childId, currentlyMember) => {
     try {
       if (currentlyMember) {
-        await api.delete(`/api/lists/${listId}/children/${childId}`);
+        await api.delete(`/api/family/lists/${listId}/children/${childId}`);
       } else {
-        await api.post(`/api/lists/${listId}/children/${childId}`);
+        await api.post(`/api/family/lists/${listId}/children/${childId}`);
       }
       setChildrenList((prev) =>
         prev.map((c) =>

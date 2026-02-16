@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import { processAllFiles } from "./sortfolder.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const pricesRoot = path.resolve(__dirname, "../../my_prices");
+const pricesRoot = path.resolve(__dirname, "../my_prices");
 
 async function main() {
   if (!fs.existsSync(pricesRoot)) {

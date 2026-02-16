@@ -1,11 +1,13 @@
 import React, { useContext, useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
+import { ThemeContext } from "../context/ThemeContext";
 import api from "../api";
 import NotificationBell from "./NotificationBell";
 
 const NavBar = () => {
   const { user, setUser, loading, isLinkedChild } = useContext(AuthContext);
+  const { theme, toggleTheme } = useContext(ThemeContext);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -67,6 +69,14 @@ const NavBar = () => {
 
           {/* Desktop user section */}
           <div className="d-none d-lg-flex align-items-center gap-2">
+            <button
+              className="sc-icon-btn"
+              onClick={toggleTheme}
+              title={theme === 'light' ? 'מצב כהה' : 'מצב בהיר'}
+              style={{ fontSize: "1rem" }}
+            >
+              <i className={`bi bi-${theme === 'light' ? 'moon-stars' : 'sun'}`}></i>
+            </button>
             {loading ? null : user ? (
               <>
                 <span
@@ -127,6 +137,15 @@ const NavBar = () => {
               </Link>
             </li>
           ))}
+
+          <li><div className="sc-divider"></div></li>
+
+          <li>
+            <button onClick={toggleTheme}>
+              <i className={`bi bi-${theme === 'light' ? 'moon-stars' : 'sun'} me-2`}></i>
+              {theme === 'light' ? 'מצב כהה' : 'מצב בהיר'}
+            </button>
+          </li>
 
           <li><div className="sc-divider"></div></li>
 

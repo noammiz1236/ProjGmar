@@ -14,10 +14,12 @@
     "iconv-lite": "^0.7.2",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.1",
+    "multer": "^2.0.2",
     "node-cron": "^4.2.1",
     "nodemailer": "^8.0.1",
     "pg": "^8.17.2",
     "socket.io": "^4.8.3",
+    "tesseract.js": "^7.0.0",
     "validator": "^13.15.26",
     "xml-stream-saxjs": "^0.4.6",
     "xml2js": "^0.6.2"
