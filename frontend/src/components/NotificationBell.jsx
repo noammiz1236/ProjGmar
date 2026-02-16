@@ -12,7 +12,7 @@ const NotificationBell = () => {
   useEffect(() => {
     const fetchPending = async () => {
       try {
-        const { data } = await api.get("/api/kid-requests/pending");
+        const { data } = await api.get("/api/family/kid-requests/pending");
         setRequests(data.requests);
       } catch (err) {
         console.error(err);
@@ -40,7 +40,7 @@ const NotificationBell = () => {
 
   const handleResolve = async (requestId, action) => {
     try {
-      await api.post(`/api/kid-requests/${requestId}/resolve`, { action });
+      await api.post(`/api/family/kid-requests/${requestId}/resolve`, { action });
       setRequests((prev) => prev.filter((r) => r.id !== requestId && r.requestId !== requestId));
     } catch (err) {
       console.error(err);

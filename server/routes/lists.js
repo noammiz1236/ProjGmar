@@ -101,7 +101,7 @@ router.get("/:id/items", authenticateToken, async (req, res) => {
 
 /**
  * POST /api/lists/:id/items
- * Add item to list
+ * Add item to list (parents/regular users only - children must use /api/family/kid-requests)
  */
 router.post("/:id/items", authenticateToken, async (req, res) => {
   const listId = req.params.id;
@@ -113,6 +113,19 @@ router.post("/:id/items", authenticateToken, async (req, res) => {
   }
 
   try {
+    // Check if user is a child account
+    const userCheck = await db.query(
+      "SELECT parent_id FROM app2.users WHERE id = $1",
+      [req.userId]
+    );
+
+    if (userCheck.rows.length > 0 && userCheck.rows[0].parent_id !== null) {
+      return res.status(403).json({ 
+        message: "ילדים חייבים לבקש אישור מההורים להוספת פריטים",
+        isChild: true 
+      });
+    }
+
     const membership = await db.query(
       "SELECT id FROM app.list_members WHERE list_id = $1 AND user_id = $2",
       [listId, req.userId]

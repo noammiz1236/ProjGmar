@@ -134,7 +134,7 @@ const Store = () => {
     try {
       const selectedList = lists.find((l) => l.id === selectedListId);
       if (isLinkedChild) {
-        await api.post("/api/kid-requests", {
+        await api.post("/api/family/kid-requests", {
           listId: selectedListId,
           itemName: selectedProduct.item_name,
           price: selectedProduct.price || null,

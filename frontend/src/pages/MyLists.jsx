@@ -31,7 +31,7 @@ const MyLists = () => {
 
   const fetchRequests = async () => {
     try {
-      const { data } = await api.get("/api/kid-requests/my");
+      const { data } = await api.get("/api/family/kid-requests/my");
       setRequests(data.requests);
     } catch (err) {
       console.error(err);

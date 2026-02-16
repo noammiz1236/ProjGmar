@@ -168,7 +168,7 @@ const ListDetail = () => {
 
     if (isLinkedChild) {
       try {
-        await api.post("/api/kid-requests", {
+        await api.post("/api/family/kid-requests", {
           listId: parseInt(listId),
           itemName: selectedProduct.item_name,
           price: selectedProduct.price || null,

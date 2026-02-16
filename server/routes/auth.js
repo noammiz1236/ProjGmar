@@ -206,8 +206,8 @@ router.get("/verify-email", async (req, res) => {
     // Use sameSite: "none" for cross-origin (Tailscale) support on mobile
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      secure: false, // Changed for HTTP (Tailscale) // Required for sameSite: "none" and mobile Safari
-      sameSite: "none", // Allow cross-origin cookies (Tailscale IP)
+      secure: true,
+      sameSite: "none",
       path: "/",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
@@ -260,11 +260,10 @@ router.post("/login", authLimiter, loginValidator, async (req, res) => {
 
     const { accessToken, refreshToken } = await generateTokens(user.id, db);
 
-    // Use sameSite: "none" for cross-origin (Tailscale) support on mobile
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      secure: false, // Changed for HTTP (Tailscale) // Required for sameSite: "none" and mobile Safari
-      sameSite: "none", // Allow cross-origin cookies (Tailscale IP)
+      secure: true,
+      sameSite: "none",
       path: "/",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
@@ -275,6 +274,7 @@ router.post("/login", authLimiter, loginValidator, async (req, res) => {
         first_name: user.first_name,
         email: user.email,
         username: user.username,
+        parent_id: user.parent_id || null, // ← CRITICAL: Frontend needs this to detect child accounts
       },
       accessToken,
       refreshToken,
@@ -326,8 +326,8 @@ router.post("/refresh", async (req, res) => {
 
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      secure: false, // Changed for HTTP (Tailscale) // Required for sameSite: "none" and mobile Safari
-      sameSite: "none", // Allow cross-origin cookies (Tailscale IP)
+      secure: true,
+      sameSite: "none",
       path: "/",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     });
@@ -404,7 +404,7 @@ router.post("/logout-all", authenticateToken, async (req, res) => {
 
     res.clearCookie("refreshToken", {
       httpOnly: true,
-      secure: false, // Changed for HTTP (Tailscale)
+      secure: true,
       sameSite: "none",
       path: "/",
     });

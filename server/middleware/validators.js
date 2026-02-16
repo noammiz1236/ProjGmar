@@ -21,7 +21,8 @@ const registerValidator = [
 ];
 
 const loginValidator = [
-  body('email').isEmail().normalizeEmail(),
+  body('email').optional().isEmail().normalizeEmail(),
+  body('username').optional().trim().notEmpty(),
   body('password').notEmpty(),
   validate
 ];
