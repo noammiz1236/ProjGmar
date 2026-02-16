@@ -2,6 +2,7 @@ import React, { useState, useEffect, useContext } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { AuthContext } from "../context/AuthContext";
 import api from "../api";
+import PriceHistoryChart from "../components/PriceHistoryChart";
 
 const ProductPage = () => {
   const { id } = useParams();
@@ -135,8 +136,8 @@ const ProductPage = () => {
               height: "360px",
               background: "linear-gradient(135deg, rgba(99,102,241,0.04), rgba(236,72,153,0.04))"
             }}>
-              {product.image ? (
-                <img src={product.image} alt={product.item_name} style={{ maxHeight: "100%", maxWidth: "100%", objectFit: "contain" }} />
+              {product.image_url ? (
+                <img src={product.image_url} alt={product.item_name} style={{ maxHeight: "100%", maxWidth: "100%", objectFit: "contain" }} />
               ) : (
                 <div className="text-center">
                   <i className="bi bi-box-seam" style={{ fontSize: "4rem", color: "var(--sc-primary)", opacity: 0.25 }}></i>
@@ -196,6 +197,19 @@ const ProductPage = () => {
             </div>
           </div>
         </div>
+
+        {/* Price History Chart */}
+        {user && (
+          <div className="row mt-4">
+            <div className="col-12">
+              <h5 className="fw-bold mb-3">
+                <i className="bi bi-graph-up me-2" style={{ color: 'var(--sc-primary)' }}></i>
+                היסטוריית מחירים
+              </h5>
+              <PriceHistoryChart productId={id} />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* List selection modal */}

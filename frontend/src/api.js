@@ -7,18 +7,32 @@ const api = axios.create({
   withCredentials: true, // זה מבטיח שהעוגייה תישלח בכל בקשה של api.get/post
 });
 
-// משתנה מקומי בתוך הקובץ שיחזיק את ה-Access Token בזיכרון (מאובטח)
+// Store access token in localStorage for persistence across refreshes
 let accessToken = null;
 
 export const setAccessToken = (token) => {
   accessToken = token;
+  if (token) {
+    localStorage.setItem('accessToken', token);
+  } else {
+    localStorage.removeItem('accessToken');
+  }
+};
+
+// Restore token from localStorage on module load
+export const getAccessToken = () => {
+  if (!accessToken) {
+    accessToken = localStorage.getItem('accessToken');
+  }
+  return accessToken;
 };
 
 // 1. Interceptor לבקשות - הזרקת הטוקן ל-Header
 api.interceptors.request.use(
   (config) => {
-    if (accessToken) {
-      config.headers.Authorization = `Bearer ${accessToken}`;
+    const token = getAccessToken();
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   },
