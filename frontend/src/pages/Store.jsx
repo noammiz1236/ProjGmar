@@ -11,6 +11,8 @@ const Store = () => {
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searched, setSearched] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [recentSearches, setRecentSearches] = useState([]);
   const searchTimeoutRef = useRef(null);
   const limit = 20;
   const offsetRef = useRef(0);
@@ -22,6 +24,26 @@ const Store = () => {
   const [addingToList, setAddingToList] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
   const [quantity, setQuantity] = useState(1);
+
+  // Load recent searches on mount
+  React.useEffect(() => {
+    const saved = localStorage.getItem('smartcart-recent-searches');
+    if (saved) {
+      try {
+        setRecentSearches(JSON.parse(saved));
+      } catch (e) {
+        console.error('Failed to parse recent searches', e);
+      }
+    }
+  }, []);
+
+  // Save search to recent
+  const saveRecentSearch = (query) => {
+    if (!query.trim()) return;
+    const updated = [query, ...recentSearches.filter(s => s !== query)].slice(0, 5);
+    setRecentSearches(updated);
+    localStorage.setItem('smartcart-recent-searches', JSON.stringify(updated));
+  };
 
   const fetchProducts = async (reset = false) => {
     const q = searchRef.current.trim();
@@ -58,14 +80,32 @@ const Store = () => {
       setProducts([]);
       setSearched(false);
       setHasMore(false);
+      setShowSuggestions(true);
       return;
     }
+    setShowSuggestions(false);
     searchTimeoutRef.current = setTimeout(() => {
       offsetRef.current = 0;
       setLoading(true);
       setSearched(true);
+      saveRecentSearch(value);
       fetchProducts(true);
-    }, 400);
+    }, 300);
+  };
+
+  const selectRecentSearch = (query) => {
+    setSearchQuery(query);
+    searchRef.current = query;
+    setShowSuggestions(false);
+    offsetRef.current = 0;
+    setLoading(true);
+    setSearched(true);
+    fetchProducts(true);
+  };
+
+  const clearRecentSearches = () => {
+    setRecentSearches([]);
+    localStorage.removeItem('smartcart-recent-searches');
   };
 
   const loadMore = () => {
@@ -144,13 +184,15 @@ const Store = () => {
         </div>
 
         {/* Search bar */}
-        <div className="sc-store-search mb-4">
+        <div className="sc-store-search mb-4" style={{ position: 'relative' }}>
           <i className="bi bi-search search-icon"></i>
           <input
             type="text"
             placeholder="חפש מוצר..."
             value={searchQuery}
             onChange={(e) => handleSearchChange(e.target.value)}
+            onFocus={() => !searchQuery && setShowSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
             autoFocus
           />
           {searchQuery && (
@@ -160,6 +202,71 @@ const Store = () => {
             >
               <i className="bi bi-x-lg"></i>
             </button>
+          )}
+          {loading && !products.length && (
+            <div style={{ position: 'absolute', left: searchQuery ? '50px' : '18px', top: '50%', transform: 'translateY(-50%)' }}>
+              <div className="spinner-border spinner-border-sm" style={{ color: 'var(--sc-primary)', width: '18px', height: '18px' }}></div>
+            </div>
+          )}
+
+          {/* Recent Searches Dropdown */}
+          {showSuggestions && !searchQuery && recentSearches.length > 0 && (
+            <div style={{
+              position: 'absolute',
+              top: 'calc(100% + 8px)',
+              left: 0,
+              right: 0,
+              background: 'var(--sc-surface)',
+              border: '1px solid var(--sc-border)',
+              borderRadius: 'var(--sc-radius)',
+              boxShadow: 'var(--sc-shadow-lg)',
+              padding: '8px 0',
+              zIndex: 100,
+              maxWidth: '640px',
+              margin: '0 auto'
+            }}>
+              <div style={{ 
+                padding: '8px 16px', 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                borderBottom: '1px solid var(--sc-border)'
+              }}>
+                <small style={{ color: 'var(--sc-text-muted)', fontWeight: 600 }}>חיפושים אחרונים</small>
+                <button 
+                  onClick={clearRecentSearches}
+                  style={{ 
+                    background: 'none', 
+                    border: 'none', 
+                    color: 'var(--sc-danger)', 
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    padding: '2px 8px'
+                  }}
+                >
+                  נקה
+                </button>
+              </div>
+              {recentSearches.map((query, idx) => (
+                <div
+                  key={idx}
+                  onClick={() => selectRecentSearch(query)}
+                  style={{
+                    padding: '10px 16px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '12px',
+                    transition: 'background 0.15s ease'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--sc-bg)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  <i className="bi bi-clock-history" style={{ color: 'var(--sc-text-muted)', fontSize: '0.9rem' }}></i>
+                  <span style={{ fontSize: '0.9rem' }}>{query}</span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
 
@@ -259,9 +366,13 @@ const Store = () => {
                       })
                     }
                   >
-                    <div className="sc-product-icon">
-                      <i className="bi bi-box-seam"></i>
-                    </div>
+                    {product.image_url ? (
+                      <img src={product.image_url} alt={product.item_name} className="sc-product-icon" style={{ objectFit: "contain", background: "#fff" }} />
+                    ) : (
+                      <div className="sc-product-icon">
+                        <i className="bi bi-box-seam"></i>
+                      </div>
+                    )}
                     <div className="sc-product-info">
                       <p className="sc-product-name">{product.item_name}</p>
                       {product.chain_name && (
@@ -367,10 +478,11 @@ const Store = () => {
                   justifyContent: "center",
                 }}
               >
-                <i
-                  className="bi bi-box-seam"
-                  style={{ color: "var(--sc-primary)", fontSize: "1.1rem" }}
-                ></i>
+                {selectedProduct.image_url ? (
+                  <img src={selectedProduct.image_url} alt="" style={{ width: "28px", height: "28px", objectFit: "contain" }} />
+                ) : (
+                  <i className="bi bi-box-seam" style={{ color: "var(--sc-primary)", fontSize: "1.1rem" }}></i>
+                )}
               </div>
               <div style={{ flex: 1 }}>
                 <div className="fw-bold" style={{ fontSize: "0.9rem" }}>
