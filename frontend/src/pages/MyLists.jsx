@@ -201,7 +201,7 @@ const MyLists = () => {
                           className="fw-bold mb-0"
                           style={{ fontSize: "1.05rem" }}
                         >
-                          {list.name}
+                          {list.list_name}
                         </h5>
                         {!isLinkedChild && (
                           <span

@@ -20,7 +20,7 @@ export const authenticateToken = (req, res, next) => {
     // Verify it's an access token (not refresh)
     if (payload.type !== "access") {
       console.log('[AUTH] Invalid token type:', payload.type);
-      return res.status(403).json({ message: "Invalid token type" });
+      return res.status(401).json({ message: "Invalid token type" });
     }
 
     req.userId = payload.sub;
@@ -28,6 +28,6 @@ export const authenticateToken = (req, res, next) => {
     next();
   } catch (err) {
     console.log('[AUTH] Token verification failed:', err.message);
-    return res.status(403).json({ message: "Invalid or expired token" });
+    return res.status(401).json({ message: "Invalid or expired token" });
   }
 };

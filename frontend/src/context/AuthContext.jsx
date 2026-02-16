@@ -27,11 +27,11 @@ export const AuthProvider = ({ children }) => {
 
     const initAuth = async () => {
       console.log("Checking for existing session...");
-      
+
       // Try to restore from localStorage first (fast path for page refresh)
       const storedToken = localStorage.getItem('accessToken');
       const storedUser = localStorage.getItem('user');
-      
+
       if (storedToken && storedUser) {
         try {
           const userData = JSON.parse(storedUser);
@@ -39,7 +39,7 @@ export const AuthProvider = ({ children }) => {
           setUser(userData);
           console.log("Session restored from localStorage");
           setLoading(false);
-          
+
           // Validate token in background
           api.get("/api/me").catch(() => {
             // Token expired, try refresh
@@ -50,7 +50,7 @@ export const AuthProvider = ({ children }) => {
           console.log("Failed to parse stored user data, falling back to server");
         }
       }
-      
+
       // Fallback: restore from server via refresh token
       await initAuthFromServer();
       setLoading(false);

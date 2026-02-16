@@ -607,8 +607,8 @@ const ListDetail = () => {
                         transition: "background 0.15s ease",
                       }}
                       onMouseEnter={(e) =>
-                        (e.currentTarget.style.background =
-                          "rgba(79,70,229,0.04)")
+                      (e.currentTarget.style.background =
+                        "rgba(79,70,229,0.04)")
                       }
                       onMouseLeave={(e) =>
                         (e.currentTarget.style.background = "transparent")

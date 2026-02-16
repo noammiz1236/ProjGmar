@@ -61,6 +61,7 @@ const Store = () => {
       console.log(newProducts);
       if (reset) setProducts(newProducts);
       else setProducts((prev) => [...prev, ...newProducts]);
+
       offsetRef.current =
         response.data.nextOffset || currentOffset + newProducts.length;
       setHasMore(response.data.hasMore ?? false);
@@ -225,20 +226,20 @@ const Store = () => {
               maxWidth: '640px',
               margin: '0 auto'
             }}>
-              <div style={{ 
-                padding: '8px 16px', 
-                display: 'flex', 
-                justifyContent: 'space-between', 
+              <div style={{
+                padding: '8px 16px',
+                display: 'flex',
+                justifyContent: 'space-between',
                 alignItems: 'center',
                 borderBottom: '1px solid var(--sc-border)'
               }}>
                 <small style={{ color: 'var(--sc-text-muted)', fontWeight: 600 }}>חיפושים אחרונים</small>
-                <button 
+                <button
                   onClick={clearRecentSearches}
-                  style={{ 
-                    background: 'none', 
-                    border: 'none', 
-                    color: 'var(--sc-danger)', 
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--sc-danger)',
                     fontSize: '0.8rem',
                     cursor: 'pointer',
                     padding: '2px 8px'
@@ -374,7 +375,7 @@ const Store = () => {
                       </div>
                     )}
                     <div className="sc-product-info">
-                      <p className="sc-product-name">{product.name}</p>
+                      <p className="sc-product-name">{product.item_name}</p>
                       {product.chain_name && (
                         <div className="sc-product-chain">
                           <i className="bi bi-shop me-1"></i>
@@ -383,7 +384,7 @@ const Store = () => {
                       )}
                     </div>
                     <div className="sc-product-price">
-                      ₪{product.price ?? "—"}
+                      ₪{product.price}
                     </div>
                   </div>
                   {user && (
