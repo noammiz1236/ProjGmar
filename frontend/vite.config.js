@@ -6,6 +6,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: '0.0.0.0',
-    port: 5173
+    port: 5173,
+    allowedHosts: [
+      'node.taila7c4f9.ts.net',
+      '100.115.197.11',
+      'localhost'
+    ]
   }
 })

@@ -21,16 +21,9 @@ const registerValidator = [
 ];
 
 const loginValidator = [
-  body('password').notEmpty().withMessage('Password is required'),
-  (req, res, next) => {
-    if (!req.body.email && !req.body.username) {
-      return res.status(400).json({
-        success: false,
-        errors: [{ msg: 'Email or username is required', param: 'identifier' }]
-      });
-    }
-    next();
-  },
+  body('email').optional().isEmail().normalizeEmail(),
+  body('username').optional().trim().notEmpty(),
+  body('password').notEmpty(),
   validate
 ];
 
